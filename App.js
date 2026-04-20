@@ -82,9 +82,12 @@ function usePersist(key, def) {
     load(key).then(v => { if(v !== null) _set(v); setReady(true); });
   }, []);
   const set = useCallback((v) => {
-    const next = typeof v === "function" ? v(state) : v;
-    _set(next); save(key, next);
-  }, [state]);
+    _set(prev => {
+      const next = typeof v === "function" ? v(prev) : v;
+      save(key, next);
+      return next;
+    });
+  }, [key]);
   return [state, set, ready];
 }
 
@@ -1240,9 +1243,9 @@ export default function App() {
   const [expenses,  setExpenses,  eReady] = usePersist(K.expenses,  S_EXPENSES);
   const [goals,     setGoals,     gReady] = usePersist(K.goals,     S_GOALS);
   const [debts,     setDebts,     dReady] = usePersist(K.debts,     S_DEBTS);
-  const [income,    ,             iReady] = usePersist(K.income,    S_INCOME);
+  const [income,    setIncome,    iReady] = usePersist(K.income,    S_INCOME);
   const [reminders, setReminders, rReady] = usePersist(K.reminders, S_REMINDERS);
-  const [budgets,   ,             bReady] = usePersist(K.budgets,   S_BUDGETS);
+  const [budgets,   setBudgets,   bReady] = usePersist(K.budgets,   S_BUDGETS);
   const [tab, setTab] = useState("home");
 
   const ready = uReady && oReady && eReady && gReady && dReady && iReady && rReady && bReady;
@@ -1250,9 +1253,16 @@ export default function App() {
   if(!ready) return <LoadingScreen/>;
 
   const handleComplete = (data) => {
-    setUser({name:data.name, currency:data.currency});
-    setOnboarded(true);
-    if(data.goals?.length)  setGoals(data.goals);
+    try {
+      setUser({name: data.name || "Usuario", currency: data.currency || "RD$"});
+      setOnboarded(true);
+      if(data.goals && data.goals.length > 0) setGoals(data.goals);
+      if(data.income && data.income.length > 0) setIncome(data.income);
+      if(data.budgets && Object.keys(data.budgets).length > 0) setBudgets(data.budgets);
+    } catch(e) {
+      save(K.user, {name: data.name || "Usuario", currency: data.currency || "RD$"});
+      save(K.onboarded, true);
+    }
   };
 
   if(!onboarded || !user) return <Onboarding onComplete={handleComplete}/>;
