@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "MiFinanzas",
+    "slug": "mifinanzas",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#040406"
+    },
+    "android": {
+      "package": "com.tuapp.mifinanzas",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#040406"
+      }
+    },
+    "plugins": [
+      ["expo-build-properties", {
+        "android": { "kotlinVersion": "1.9.0" }
+      }]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "486758c3-f2db-4dfc-83db-bd33a5ebdc52"
+      }
+    }
+  }
+}
