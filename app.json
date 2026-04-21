@@ -19,13 +19,18 @@
       }
     },
     "plugins": [
-      ["expo-build-properties", {
-        "android": { "kotlinVersion": "1.9.0" }
-      }]
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "1.9.0"
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {
-        "projectId": "486758c3-f2db-4dfc-83db-bd33a5ebdc52"
+        "projectId": "0d0a5d7b-438f-482e-99a7-e37717f0dbe6"
       }
     }
   }
