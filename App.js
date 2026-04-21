@@ -64,32 +64,26 @@ const DAYS_IN_MONTH = new Date(TODAY.getFullYear(), TODAY.getMonth()+1, 0).getDa
 const MONTH_STR     = TODAY.toLocaleString("es-DO",{month:"long"}).toUpperCase();
 
 // ══════════════════════════════════════════════════════════════════════════════
-// PERSISTENCIA
+
 // ══════════════════════════════════════════════════════════════════════════════
-const K = { user:"mf2_user", onboarded:"mf2_onboarded", expenses:"mf2_expenses", goals:"mf2_goals", debts:"mf2_debts", income:"mf2_income", reminders:"mf2_reminders", budgets:"mf2_budgets" };
+// PERSISTENCIA — Sistema simple y robusto (todo en un solo objeto)
+// ══════════════════════════════════════════════════════════════════════════════
+const STORAGE_KEY = "mf3_data";
 
-async function save(key, val) {
-  try { await AsyncStorage.setItem(key, JSON.stringify(val)); } catch{}
-}
-async function load(key) {
-  try { const v = await AsyncStorage.getItem(key); return v ? JSON.parse(v) : null; } catch{ return null; }
+async function saveAll(data) {
+  try {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch(e) { console.warn("Save error:", e); }
 }
 
-function usePersist(key, def) {
-  const [state, _set] = useState(def);
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    load(key).then(v => { if(v !== null) _set(v); setReady(true); });
-  }, []);
-  const set = useCallback((v) => {
-    _set(prev => {
-      const next = typeof v === "function" ? v(prev) : v;
-      save(key, next);
-      return next;
-    });
-  }, [key]);
-  return [state, set, ready];
+async function loadAll() {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch(e) { return null; }
 }
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 // SAMPLE DATA
@@ -1230,42 +1224,124 @@ function NavBar({tab, setTab}) {
           </TouchableOpacity>
         );
       })}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NAV BAR
+// ══════════════════════════════════════════════════════════════════════════════
+const NAV_ITEMS = [
+  {id:"home",  icon:"◈",  label:"Inicio"},
+  {id:"chat",  icon:"◉",  label:"IA"},
+  {id:"deudas",icon:"💳", label:"Deudas"},
+  {id:"metas", icon:"◎",  label:"Metas"},
+  {id:"mas",   icon:"⋯",  label:"Más"},
+];
+
+function NavBar({tab, setTab}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[st.navBar, {paddingBottom:insets.bottom+8}]}>
+      {NAV_ITEMS.map(item => {
+        const active = tab === item.id;
+        return (
+          <TouchableOpacity key={item.id} onPress={()=>setTab(item.id)} style={st.navBtn} activeOpacity={0.7}>
+            {active && (
+              <View style={{position:"absolute",top:0,width:32,height:2,backgroundColor:T.mint,borderRadius:99}}/>
+            )}
+            <Text style={{fontSize:item.icon.length>2?14:22,color:active?T.mint:T.t4,marginTop:6}}>{item.icon}</Text>
+            <Text style={{fontSize:9,fontWeight:"700",color:active?T.mint:T.t4,marginTop:2,letterSpacing:.5}}>{item.label}</Text>
+          </TouchableOpacity>
+        );
+      })}
     </View>
   );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ROOT APP
+// ROOT APP — Estado simple sin hooks personalizados
 // ══════════════════════════════════════════════════════════════════════════════
 export default function App() {
-  const [user,      setUser,      uReady] = usePersist(K.user,      null);
-  const [onboarded, setOnboarded, oReady] = usePersist(K.onboarded, false);
-  const [expenses,  setExpenses,  eReady] = usePersist(K.expenses,  S_EXPENSES);
-  const [goals,     setGoals,     gReady] = usePersist(K.goals,     S_GOALS);
-  const [debts,     setDebts,     dReady] = usePersist(K.debts,     S_DEBTS);
-  const [income,    setIncome,    iReady] = usePersist(K.income,    S_INCOME);
-  const [reminders, setReminders, rReady] = usePersist(K.reminders, S_REMINDERS);
-  const [budgets,   setBudgets,   bReady] = usePersist(K.budgets,   S_BUDGETS);
-  const [tab, setTab] = useState("home");
+  const [loading,   setLoading]   = useState(true);
+  const [onboarded, setOnboarded] = useState(false);
+  const [tab,       setTab]       = useState("home");
 
-  const ready = uReady && oReady && eReady && gReady && dReady && iReady && rReady && bReady;
+  // Estado principal
+  const [user,      setUser]      = useState(null);
+  const [expenses,  setExpenses]  = useState(S_EXPENSES);
+  const [goals,     setGoals]     = useState(S_GOALS);
+  const [debts,     setDebts]     = useState(S_DEBTS);
+  const [income,    setIncome]    = useState(S_INCOME);
+  const [reminders, setReminders] = useState(S_REMINDERS);
+  const [budgets,   setBudgets]   = useState(S_BUDGETS);
 
-  if(!ready) return <LoadingScreen/>;
+  // Cargar datos al iniciar
+  useEffect(() => {
+    loadAll().then(saved => {
+      if (saved && saved.onboarded && saved.user) {
+        setUser(saved.user);
+        setOnboarded(true);
+        if (saved.expenses  && saved.expenses.length  > 0) setExpenses(saved.expenses);
+        if (saved.goals     && saved.goals.length     > 0) setGoals(saved.goals);
+        if (saved.debts     && saved.debts.length     > 0) setDebts(saved.debts);
+        if (saved.income    && saved.income.length    > 0) setIncome(saved.income);
+        if (saved.reminders && saved.reminders.length > 0) setReminders(saved.reminders);
+        if (saved.budgets   && Object.keys(saved.budgets).length > 0) setBudgets(saved.budgets);
+      }
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
 
+  // Guardar cada vez que cambia algo
+  useEffect(() => {
+    if (!loading && onboarded && user) {
+      saveAll({ onboarded, user, expenses, goals, debts, income, reminders, budgets });
+    }
+  }, [expenses, goals, debts, income, reminders, budgets, user, onboarded]);
+
+  if (loading) return <LoadingScreen/>;
+
+  // Onboarding completado
   const handleComplete = (data) => {
     try {
-      setUser({name: data.name || "Usuario", currency: data.currency || "RD$"});
-      setOnboarded(true);
-      if(data.goals && data.goals.length > 0) setGoals(data.goals);
-      if(data.income && data.income.length > 0) setIncome(data.income);
-      if(data.budgets && Object.keys(data.budgets).length > 0) setBudgets(data.budgets);
+      const userData = {
+        name:     (data.name     || "Usuario").trim(),
+        currency: (data.currency || "RD$"),
+      };
+      const newGoals     = (data.goals    && data.goals.length    > 0) ? data.goals    : [];
+      const newIncome    = (data.income   && data.income.length   > 0) ? data.income   : S_INCOME;
+      const newBudgets   = (data.budgets  && Object.keys(data.budgets).length > 0) ? data.budgets : S_BUDGETS;
+
+      // Guardar todo junto de una vez — evita race conditions
+      const allData = {
+        onboarded: true,
+        user:      userData,
+        expenses:  S_EXPENSES,
+        goals:     newGoals,
+        debts:     S_DEBTS,
+        income:    newIncome,
+        reminders: S_REMINDERS,
+        budgets:   newBudgets,
+      };
+
+      saveAll(allData).then(() => {
+        // Solo actualizar estado DESPUÉS de guardar exitosamente
+        setUser(userData);
+        setGoals(newGoals);
+        setIncome(newIncome);
+        setBudgets(newBudgets);
+        setOnboarded(true);
+      }).catch(() => {
+        // Si falla el guardado, igual avanzar
+        setUser(userData);
+        setOnboarded(true);
+      });
     } catch(e) {
-      save(K.user, {name: data.name || "Usuario", currency: data.currency || "RD$"});
-      save(K.onboarded, true);
+      // Fallback de emergencia
+      setUser({name:"Usuario", currency:"RD$"});
+      setOnboarded(true);
     }
   };
 
-  if(!onboarded || !user) return <Onboarding onComplete={handleComplete}/>;
+  if (!onboarded || !user) return <Onboarding onComplete={handleComplete}/>;
 
   return (
     <View style={{flex:1, backgroundColor:T.bg0}}>
