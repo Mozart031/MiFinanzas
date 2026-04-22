@@ -911,26 +911,16 @@ export default function App(){
   if(loading)return <LoadingScreen/>;
 
   const handleComplete=(data)=>{
-    try{
-      const userData={name:(data.name||"Usuario").trim(),currency:data.currency||"RD$"};
-      const newGoals=(data.goals&&data.goals.length>0)?data.goals:[];
-      const newIncome=(data.income&&data.income.length>0)?data.income:S_INC;
-      const newBudgets=(data.budgets&&Object.keys(data.budgets).length>0)?data.budgets:S_BUD;
-      const allData={onboarded:true,user:userData,expenses:S_EXP,goals:newGoals,debts:S_DEBTS,income:newIncome,reminders:S_REM,budgets:newBudgets};
-      saveAll(allData).then(()=>{
-        setUser(userData);
-        setGoals(newGoals);
-        setIncome(newIncome);
-        setBudgets(newBudgets);
-        setOnboarded(true);
-      }).catch(()=>{
-        setUser(userData);
-        setOnboarded(true);
-      });
-    }catch(e){
-      setUser({name:"Usuario",currency:"RD$"});
-      setOnboarded(true);
-    }
+    const userData={name:(data.name||"Usuario").trim(),currency:data.currency||"RD$"};
+    const newGoals=(data.goals&&data.goals.length>0)?data.goals:[];
+    const newIncome=(data.income&&data.income.length>0)?data.income:S_INC;
+    const newBudgets=(data.budgets&&Object.keys(data.budgets).length>0)?data.budgets:S_BUD;
+    setUser(userData);
+    setGoals(newGoals);
+    setIncome(newIncome);
+    setBudgets(newBudgets);
+    setOnboarded(true);
+    AsyncStorage.setItem(STORAGE_KEY,JSON.stringify({onboarded:true,user:userData,expenses:S_EXP,goals:newGoals,debts:S_DEBTS,income:newIncome,reminders:S_REM,budgets:newBudgets})).catch(()=>{});
   };
 
   if(!onboarded||!user)return <Onboarding onComplete={handleComplete}/>;
