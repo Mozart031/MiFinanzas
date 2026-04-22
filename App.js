@@ -33,33 +33,8 @@ const C = {
 };
 
 // ─────────────────────────────────────────────
-// DATOS POR DEFECTO
+// DATOS POR DEFECTO — limpios, sin datos de ejemplo
 // ─────────────────────────────────────────────
-const DEF_EXPENSES = [
-  { id: 1, desc: "Supermercados Nacional", amount: 2800, cat: "Alimentacion", date: "2025-06-10" },
-  { id: 2, desc: "Gasolina Shell",         amount: 1500, cat: "Transporte",   date: "2025-06-09" },
-  { id: 3, desc: "Netflix",                amount: 580,  cat: "Suscripciones",date: "2025-06-08" },
-  { id: 4, desc: "Farmacia Carol",         amount: 900,  cat: "Salud",        date: "2025-06-07" },
-  { id: 5, desc: "Restaurante",            amount: 1200, cat: "Ocio",         date: "2025-06-06" },
-];
-const DEF_GOALS = [
-  { id: 1, name: "PC Gaming",   emoji: "🖥", target: 50000, saved: 18500, weeks: 24 },
-  { id: 2, name: "Viaje Mexico",emoji: "✈", target: 80000, saved: 12000, weeks: 40 },
-];
-const DEF_DEBTS = [
-  { id: 1, type: "tarjeta",  name: "Tarjeta BHD",    balance: 35000,  rate: 24, minPay: 1200, limit: 50000,  color: C.rose   },
-  { id: 2, type: "prestamo", name: "Prestamo Banco",  balance: 120000, rate: 18, minPay: 4500, limit: 120000, color: C.gold   },
-  { id: 3, type: "tarjeta",  name: "Tarjeta Popular", balance: 15000,  rate: 28, minPay: 600,  limit: 30000,  color: C.violet },
-];
-const DEF_INCOME = [
-  { id: 1, source: "Salario",   amount: 45000, date: "2025-06-01", type: "fijo"     },
-  { id: 2, source: "Freelance", amount: 12000, date: "2025-06-15", type: "variable" },
-];
-const DEF_REMINDERS = [
-  { id: 1, name: "Netflix",        amount: 580,  day: 8,  active: true },
-  { id: 2, name: "Prestamo BHD",   amount: 4500, day: 15, active: true },
-  { id: 3, name: "Internet Claro", amount: 1800, day: 20, active: true },
-];
 const DEF_BUDGETS = { Alimentacion: 8000, Transporte: 4000, Ocio: 3000, Suscripciones: 1500 };
 
 const CATS = {
@@ -268,7 +243,7 @@ function Onboarding({ onDone }) {
     onDone({
       user:     userData,
       goals:    goals,
-      income:   income.length > 0 ? income : DEF_INCOME,
+      income:   income,
       budgets:  Object.keys(budgets).length > 0 ? budgets : DEF_BUDGETS,
     });
   }
@@ -438,7 +413,7 @@ function Onboarding({ onDone }) {
 // ─────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────
-function HomeScreen({ state }) {
+function HomeScreen({ state, openSettings }) {
   const { expenses, income, budgets, user } = state;
   const cur = user.currency;
   const totalExp = expenses.reduce((a, e) => a + e.amount, 0);
@@ -463,9 +438,14 @@ function HomeScreen({ state }) {
             <Text style={{ fontSize: 13, color: C.t3 }}>Hola, <Text style={{ color: C.t1, fontWeight: "700" }}>{user.name}</Text> 👋</Text>
             <Text style={{ fontSize: 21, fontWeight: "800", color: C.t1 }}>Mi<Text style={{ color: C.mint }}>Finanzas</Text></Text>
           </View>
-          <View style={{ backgroundColor: grade.color + "25", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, flexDirection: "row", alignItems: "center", gap: 5 }}>
-            <Text style={{ fontSize: 13 }}>{grade.emoji}</Text>
-            <Text style={{ fontSize: 13, fontWeight: "700", color: grade.color }}>{sc}pts</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={{ backgroundColor: grade.color + "25", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <Text style={{ fontSize: 13 }}>{grade.emoji}</Text>
+              <Text style={{ fontSize: 13, fontWeight: "700", color: grade.color }}>{sc}pts</Text>
+            </View>
+            <TouchableOpacity onPress={openSettings} style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ fontSize: 18 }}>⚙️</Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -872,7 +852,7 @@ function MetasScreen({ state, setGoals }) {
 // HERRAMIENTAS (Score + Predictor + Recordatorios)
 // ─────────────────────────────────────────────
 function HerramientasScreen({ state, setReminders }) {
-  const { user, expenses, income, budgets, reminders } = state;
+  const { user, expenses, income, budgets, reminders, streakDays, goals } = state;
   const cur = user.currency;
   const [sub, setSub] = useState("score");
   const totalInc = income.reduce((a, i) => a + i.amount, 0);
@@ -882,7 +862,7 @@ function HerramientasScreen({ state, setReminders }) {
   const dailyAvg  = totalExp / Math.max(DAY, 1);
   const projected = totalExp + dailyAvg * (DAYS_IN_MONTH - DAY);
   const balEOM    = totalInc - projected;
-  const runOut    = balEOM < 0 ? Math.round(DAY + (totalInc - totalExp) / dailyAvg) : null;
+  const runOut    = balEOM < 0 ? Math.round(DAY + (totalInc - totalExp) / Math.max(dailyAvg, 1)) : null;
   const pctSpent  = Math.min((projected / Math.max(totalInc, 1)) * 100, 120);
   const [adding, setAdding] = useState(false);
   const [form,   setForm]   = useState({ name: "", amount: "", day: "" });
@@ -890,6 +870,18 @@ function HerramientasScreen({ state, setReminders }) {
   const totalRem = reminders.filter(r => r.active).reduce((a, r) => a + r.amount, 0);
   const upcoming = reminders.filter(r => r.active && r.day >= today).sort((a, b) => a.day - b.day);
   const past     = reminders.filter(r => r.active && r.day < today);
+
+  // Rachas y logros reales
+  const streak       = calcStreak(streakDays || []);
+  const savingGoal   = user.savingGoalPct || 20;
+  const ct = {};
+  expenses.forEach(e => { ct[e.cat] = (ct[e.cat] || 0) + e.amount; });
+  const budgetCats   = Object.entries(budgets);
+  const overBudget   = budgetCats.some(([k, l]) => (ct[k] || 0) > l);
+  const hasActiveGoal = goals && goals.length > 0;
+  const isSuperSaver  = savePct >= 30;
+  const noNewDebts    = state.debts && state.debts.length === 0;
+  const perfectMonth  = expenses.length >= 20 && !overBudget && savePct >= savingGoal;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={["top"]}>
@@ -916,7 +908,7 @@ function HerramientasScreen({ state, setReminders }) {
             </Card>
             <Card style={{ marginBottom: 12 }}>
               <Text style={{ fontSize: 13, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Desglose del Score</Text>
-              {[["💰 Tasa de ahorro", s.ahorro, C.mint], ["📊 Control presupuesto", s.presupuesto, C.sky], ["📝 Registro constante", s.consistencia, C.violet], ["💳 Manejo de deudas", s.deuda, C.gold]].map(([label, val, color]) => (
+              {[["💰 Tasa de ahorro", s.ahorro, C.mint], ["📊 Control", s.presupuesto, C.sky], ["📝 Registro", s.consistencia, C.violet], ["💳 Manejo de deudas", s.deuda, C.gold]].map(([label, val, color]) => (
                 <View key={label} style={{ marginBottom: 12 }}>
                   <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
                     <Text style={{ fontSize: 12, color: C.t2 }}>{label}</Text>
@@ -929,7 +921,14 @@ function HerramientasScreen({ state, setReminders }) {
             <Card>
               <Text style={{ fontSize: 13, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Logros 🏅</Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
-                {[["🔥","Racha activa","5 dias registrando",true],["💯","Sin exceder","Presupuesto OK",true],["🎯","Meta activa","Ahorro en curso",true],["🦸","Super ahorrador","30%+ ahorro",savePct >= 30],["🧘","Sin deudas nuevas","30 dias",false],["📆","Mes perfecto","100% cumplido",false]].map(([ic, label, desc, done]) => (
+                {[
+                  ["🔥", "Racha activa",     streak + " dias registrando", streak >= 3],
+                  ["💯", "Sin exceder",       "Presupuesto OK",             !overBudget && expenses.length > 0],
+                  ["🎯", "Meta activa",       "Ahorro en curso",            hasActiveGoal],
+                  ["🦸", "Super ahorrador",  "30%+ ahorro",                isSuperSaver],
+                  ["🧘", "Sin deudas",       "Lista de deudas limpia",     noNewDebts],
+                  ["📆", "Mes perfecto",     "20+ registros, meta alcanzada", perfectMonth],
+                ].map(([ic, label, desc, done]) => (
                   <View key={label} style={{ width: "47%", backgroundColor: done ? C.mintBg : C.card2, borderRadius: 14, borderWidth: 1, borderColor: done ? C.mint + "40" : C.border, padding: 13, opacity: done ? 1 : 0.35 }}>
                     <Text style={{ fontSize: 22, marginBottom: 6 }}>{ic}</Text>
                     <Text style={{ fontSize: 12, fontWeight: "700", color: done ? C.mint : C.t3 }}>{label}</Text>
@@ -976,6 +975,37 @@ function HerramientasScreen({ state, setReminders }) {
                 </View>
               ))}
             </Card>
+            {totalInc > 0 && (
+              <Card style={{ marginBottom: 12 }}>
+                <Text style={{ fontSize: 13, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Lineas de referencia</Text>
+                {(() => {
+                  const goalAmt = totalInc * (savingGoal / 100);
+                  const maxGastable = totalInc - goalAmt;
+                  const pctGastado = Math.min((totalExp / maxGastable) * 100, 120);
+                  const pctIngresos = Math.min((totalExp / totalInc) * 100, 100);
+                  return (
+                    <>
+                      <View style={{ marginBottom: 12 }}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
+                          <Text style={{ fontSize: 12, color: C.t2 }}>🟢 Meta de ahorro ({savingGoal}%)</Text>
+                          <Text style={{ fontSize: 12, fontWeight: "700", color: pctGastado > 100 ? C.rose : C.green }}>{Math.round(pctGastado)}%</Text>
+                        </View>
+                        <Bar pct={pctGastado} color={C.green} h={5} />
+                        <Text style={{ fontSize: 10, color: C.t3, marginTop: 4 }}>Puedes gastar hasta {money(Math.round(maxGastable), cur)} para cumplir tu meta</Text>
+                      </View>
+                      <View>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
+                          <Text style={{ fontSize: 12, color: C.t2 }}>🔵 Limite de ingresos</Text>
+                          <Text style={{ fontSize: 12, fontWeight: "700", color: C.sky }}>{money(totalInc, cur)}</Text>
+                        </View>
+                        <Bar pct={pctIngresos} color={C.sky} h={5} />
+                        <Text style={{ fontSize: 10, color: C.t3, marginTop: 4 }}>Gastado: {Math.round(pctIngresos)}% de tus ingresos totales</Text>
+                      </View>
+                    </>
+                  );
+                })()}
+              </Card>
+            )}
           </>
         )}
 
@@ -1057,6 +1087,91 @@ function HerramientasScreen({ state, setReminders }) {
 }
 
 // ─────────────────────────────────────────────
+// UTILIDAD: calcular racha real de dias
+// ─────────────────────────────────────────────
+function calcStreak(streakDays) {
+  if (!streakDays || streakDays.length === 0) return 0;
+  const sorted = [...new Set(streakDays)].sort().reverse();
+  let streak = 0;
+  let check = new Date();
+  check.setHours(0, 0, 0, 0);
+  for (let i = 0; i < sorted.length; i++) {
+    const d = new Date(sorted[i]);
+    d.setHours(0, 0, 0, 0);
+    const diff = Math.round((check - d) / 86400000);
+    if (diff === 0 || diff === streak) { streak++; check = d; }
+    else if (diff > 1) break;
+  }
+  return streak;
+}
+
+// ─────────────────────────────────────────────
+// SETTINGS MODAL — Centro de Mando
+// ─────────────────────────────────────────────
+function SettingsModal({ state, updateState, onClose }) {
+  const { user, income, budgets } = state;
+  const cur = user.currency;
+  const totalInc = income.reduce((a, i) => a + i.amount, 0);
+  const [name,        setName]       = useState(user.name);
+  const [salary,      setSalary]     = useState(totalInc > 0 ? String(totalInc) : "");
+  const [savingGoal,  setSavingGoal] = useState(String(user.savingGoalPct || 20));
+  const [buds,        setBuds]       = useState({ ...budgets });
+
+  function save() {
+    const newInc = +salary > 0
+      ? [{ id: 1, source: "Salario", amount: +salary, date: new Date().toISOString().split("T")[0], type: "fijo" }]
+      : income;
+    updateState({
+      user: { ...user, name: name.trim() || user.name, savingGoalPct: +savingGoal || 20 },
+      income: newInc,
+      budgets: buds,
+    });
+    onClose();
+  }
+
+  return (
+    <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "#000000CC", justifyContent: "flex-end" }}>
+      <View style={{ backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: C.border, maxHeight: "88%" }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 20, borderBottomWidth: 1, borderBottomColor: C.border }}>
+          <Text style={{ fontSize: 18, fontWeight: "800", color: C.t1 }}>Centro de Mando ⚙️</Text>
+          <TouchableOpacity onPress={onClose}><Text style={{ fontSize: 22, color: C.t3 }}>✕</Text></TouchableOpacity>
+        </View>
+        <ScrollView style={{ padding: 20 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Text style={[styles.lbl, { marginBottom: 6 }]}>TU NOMBRE</Text>
+          <Input value={name} onChange={setName} placeholder="Tu nombre" />
+
+          <Text style={[styles.lbl, { marginTop: 12, marginBottom: 6 }]}>INGRESO MENSUAL ({cur})</Text>
+          <Input value={salary} onChange={setSalary} placeholder="ej: 45000" numeric />
+
+          <Text style={[styles.lbl, { marginTop: 12, marginBottom: 6 }]}>META DE AHORRO (%)</Text>
+          <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
+            {["10","20","30","40","50"].map(p => (
+              <TouchableOpacity key={p} onPress={() => setSavingGoal(p)} style={{ flex: 1, paddingVertical: 10, borderRadius: 11, borderWidth: 1.5, borderColor: savingGoal === p ? C.mint : C.border, backgroundColor: savingGoal === p ? C.mintBg : C.card2, alignItems: "center" }}>
+                <Text style={{ fontSize: 12, fontWeight: "800", color: savingGoal === p ? C.mint : C.t3 }}>{p}%</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={[styles.lbl, { marginBottom: 6 }]}>LIMITES DE PRESUPUESTO</Text>
+          {Object.keys(CATS).slice(0, 6).map(cat => (
+            <View key={cat} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: (CATS[cat]?.color || C.mint) + "20", alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: 16 }}>{CATS[cat]?.icon}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Input value={buds[cat] ? String(buds[cat]) : ""} onChange={v => setBuds({ ...buds, [cat]: +v || 0 })} placeholder={cat + " (0 = sin limite)"} numeric style={{ marginBottom: 0 }} />
+              </View>
+            </View>
+          ))}
+
+          <Btn label="Guardar cambios" onPress={save} style={{ marginTop: 8, marginBottom: 32 }} />
+        </ScrollView>
+      </View>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────
 // NAV BAR
 // ─────────────────────────────────────────────
 function NavBar({ tab, setTab }) {
@@ -1090,6 +1205,7 @@ function NavBar({ tab, setTab }) {
 export default function App() {
   const [appState, setAppState] = useState(null); // null = cargando
   const [tab, setTab] = useState("home");
+  const [showSettings, setShowSettings] = useState(false);
   const saveTimer = useRef(null);
 
   // Cargar al iniciar
@@ -1120,12 +1236,13 @@ export default function App() {
     const next = {
       onboarded: true,
       user:      data.user,
-      expenses:  DEF_EXPENSES,
-      goals:     data.goals.length > 0 ? data.goals : DEF_GOALS,
-      debts:     DEF_DEBTS,
+      expenses:  [],
+      goals:     data.goals,
+      debts:     [],
       income:    data.income,
-      reminders: DEF_REMINDERS,
+      reminders: [],
       budgets:   data.budgets,
+      streakDays: [],
     };
     // Guardar primero, luego cambiar estado
     saveApp(next).finally(() => {
@@ -1158,12 +1275,18 @@ export default function App() {
     <SafeAreaProvider>
       <View style={{ flex: 1, backgroundColor: C.bg }}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-        {tab === "home"         && <HomeScreen          state={s} />}
-        {tab === "chat"         && <ChatScreen          state={s} addExpense={e => updateState({ expenses: [e, ...s.expenses] })} />}
+        {tab === "home"         && <HomeScreen          state={s} openSettings={() => setShowSettings(true)} />}
+        {tab === "chat"         && <ChatScreen          state={s} addExpense={e => {
+          const today = new Date().toISOString().split("T")[0];
+          const streak = s.streakDays || [];
+          const newStreak = streak.includes(today) ? streak : [...streak, today];
+          updateState({ expenses: [e, ...s.expenses], streakDays: newStreak });
+        }} />}
         {tab === "deudas"       && <DeudasScreen        state={s} setDebts={v  => updateState({ debts: v })} />}
         {tab === "metas"        && <MetasScreen         state={s} setGoals={v  => updateState({ goals: v })} />}
         {tab === "herramientas" && <HerramientasScreen  state={s} setReminders={v => updateState({ reminders: v })} />}
         <NavBar tab={tab} setTab={setTab} />
+        {showSettings && <SettingsModal state={s} updateState={updateState} onClose={() => setShowSettings(false)} />}
       </View>
     </SafeAreaProvider>
   );
