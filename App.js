@@ -142,43 +142,44 @@ function payoffMonths(balance, rate, payment) {
 // UTILIDAD: calcular racha real de dias
 // ─────────────────────────────────────────────
 function calcStreak(streakDays) {
-  if (!streakDays || streakDays.length === 0) return 0;
-  const sorted = [...new Set(streakDays)].sort().reverse();
-  let streak = 0;
-  let check = new Date();
-  check.setHours(0, 0, 0, 0);
-  for (let i = 0; i < sorted.length; i++) {
-    const d = new Date(sorted[i]);
-    d.setHours(0, 0, 0, 0);
-    const diff = Math.round((check - d) / 86400000);
-    if (diff === 0 || diff === streak) { streak++; check = d; }
-    else if (diff > 1) break;
-  }
-  return streak;
-}
-
+    if (!streakDays || streakDays.length === 0) return 0;
+      const unique = Array.from(new Set(streakDays));
+        const sorted = unique.sort().reverse();
+          let streak = 0;
+            let check = new Date();
+              check.setHours(0, 0, 0, 0);
+                for (let i = 0; i < sorted.length; i++) {
+                    const d = new Date(sorted[i]);
+                        d.setHours(0, 0, 0, 0);
+                            const diff = Math.round((check - d) / 86400000);
+                                if (diff === 0 || diff === streak) { streak++; check = d; }
+                                    else if (diff > 1) break;
+                                      }
+                                        return streak;
+                                    }
+on
 // Días de runway: cuántos días sobrevives sin ingresos
 function calcRunway(balance, expenses) {
   if (expenses.length === 0) return null;
   const days = Math.max(DAY, 1);
   const dailyBurn = expenses.reduce((a, e) => a + e.amount, 0) / days;
   if (dailyBurn <= 0) return null;
-  return Math.floor(balance / dailyBurn);
-}
+return Math.floor(balance / dailyBurn);
+}	
 
 // Horas de trabajo que cuesta algo (filtro de arrepentimiento)
 function lifeHours(amount, monthlyIncome) {
   if (!monthlyIncome || monthlyIncome <= 0) return null;
   const hourlyRate = monthlyIncome / (22 * 8); // 22 días laborales × 8h
-  return Math.round(amount / hourlyRate);
+  return Math.round(amount / hourlyRate);return
 }
 
-// Modo supervivencia: % gastado vs ingresos antes de quincena
+// Modo supervivencia: % gastado vs ingrevstes de quincena
 function survivalMode(expenses, income, day) {
   const totalInc = income.reduce((a, i) => a + i.amount, 0);
   const totalExp = expenses.reduce((a, e) => a + e.amount, 0);
   if (totalInc <= 0) return false;
-  if (day <= 15) {
+  if (day <= 15) {return
     const halfInc = totalInc * 0.5;
     return totalExp >= halfInc * 0.8;
   }
