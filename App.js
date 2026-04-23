@@ -11,25 +11,40 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 // COLORES
 // ─────────────────────────────────────────────
 const C = {
-  bg:     "#040406",
-  card:   "#0E0E14",
-  card2:  "#14141C",
-  border: "#1E1E2A",
-  mint:   "#00E5B0",
-  mintBg: "#00E5B015",
-  gold:   "#F5B800",
-  goldBg: "#F5B80015",
-  rose:   "#FF4D6D",
-  roseBg: "#FF4D6D15",
-  sky:    "#38BDF8",
-  skyBg:  "#38BDF815",
-  violet: "#8B5CF6",
-  green:  "#10B981",
-  orange: "#F97316",
-  t1:     "#F8F8FC",
-  t2:     "#A0A0B8",
-  t3:     "#606078",
-  t4:     "#2A2A3A",
+  bg:      "#060608",
+  card:    "#0F0F18",
+  card2:   "#161620",
+  card3:   "#1C1C28",
+  border:  "#22223A",
+  border2: "#2E2E48",
+  mint:    "#00E5B0",
+  mintDim: "#00C49A",
+  mintBg:  "#00E5B012",
+  mintBg2: "#00E5B025",
+  gold:    "#F5B800",
+  goldDim: "#D4A000",
+  goldBg:  "#F5B80012",
+  goldBg2: "#F5B80028",
+  rose:    "#FF4D6D",
+  roseDim: "#E03358",
+  roseBg:  "#FF4D6D12",
+  roseBg2: "#FF4D6D28",
+  sky:     "#38BDF8",
+  skyDim:  "#22A8E8",
+  skyBg:   "#38BDF812",
+  skyBg2:  "#38BDF828",
+  violet:  "#A78BFA",
+  violetBg:"#A78BFA12",
+  green:   "#10B981",
+  greenBg: "#10B98112",
+  orange:  "#FB923C",
+  orangeBg:"#FB923C12",
+  pink:    "#EC4899",
+  t1:      "#F0F0FA",
+  t2:      "#9898B8",
+  t3:      "#55556A",
+  t4:      "#28283A",
+  t5:      "#1A1A28",
 };
 
 // ─────────────────────────────────────────────
@@ -40,7 +55,7 @@ const DEF_BUDGETS = { Alimentacion: 8000, Transporte: 4000, Ocio: 3000, Suscripc
 const CATS = {
   Alimentacion:  { icon: "🛒", color: C.mint   },
   Transporte:    { icon: "⛽", color: C.sky    },
-  Ocio:          { icon: "🎮", color: "#EC4899" },
+  Ocio:          { icon: "🎮", color: C.pink   },
   Salud:         { icon: "💊", color: C.green  },
   Suscripciones: { icon: "📱", color: C.violet },
   Hogar:         { icon: "🏠", color: C.orange },
@@ -123,17 +138,28 @@ function payoffMonths(balance, rate, payment) {
 }
 
 // ─────────────────────────────────────────────
-// COMPONENTES BASE
+// COMPONENTES BASE — diseño premium
 // ─────────────────────────────────────────────
-function Card({ children, style, accent }) {
+function Card({ children, style, accent, accentColor, glow, danger }) {
+  const acCol = accentColor || C.mint;
+  const borderCol = danger ? C.rose + "60" : accent ? acCol + "50" : C.border;
+  const bg = danger ? "#180008" : accent ? "#00120E" : C.card;
+  const shadowStyle = glow ? {
+    shadowColor: acCol,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
+  } : {};
   return (
-    <View style={[styles.card, accent && { borderColor: C.mint + "50", backgroundColor: "#00100A" }, style]}>
+    <View style={[styles.card, { borderColor: borderCol, backgroundColor: bg }, shadowStyle, style]}>
+      {accent && <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, backgroundColor: acCol, borderTopLeftRadius: 20, borderTopRightRadius: 20, opacity: 0.7 }} />}
       {children}
     </View>
   );
 }
 
-function Btn({ label, onPress, primary, ghost, danger, disabled, style, small }) {
+function Btn({ label, onPress, primary, ghost, danger, disabled, style, small, icon }) {
   const bg = disabled ? C.t4 : danger ? C.rose : primary !== false && !ghost ? C.mint : "transparent";
   const tc = disabled ? C.t3 : (ghost || danger) ? (danger ? C.rose : C.t2) : "#000";
   const bw = ghost ? 1 : 0;
@@ -141,8 +167,9 @@ function Btn({ label, onPress, primary, ghost, danger, disabled, style, small })
     <TouchableOpacity
       onPress={disabled ? null : onPress}
       activeOpacity={0.75}
-      style={[styles.btn, { backgroundColor: bg, borderWidth: bw, borderColor: C.border }, small && { padding: 10 }, style]}
+      style={[styles.btn, { backgroundColor: bg, borderWidth: bw, borderColor: ghost ? C.border2 : C.border }, small && { padding: 10 }, style]}
     >
+      {icon ? <Text style={{ fontSize: 16, marginRight: 6 }}>{icon}</Text> : null}
       <Text style={[styles.btnText, { color: tc }, small && { fontSize: 13 }]}>{label}</Text>
     </TouchableOpacity>
   );
@@ -155,36 +182,98 @@ function Input({ value, onChange, placeholder, numeric, style, multiline }) {
       value={value}
       onChangeText={onChange}
       placeholder={placeholder}
-      placeholderTextColor={C.t4}
+      placeholderTextColor={C.t3}
       keyboardType={numeric ? "numeric" : "default"}
       multiline={multiline}
     />
   );
 }
 
-function Bar({ pct, color, h }) {
+// Barra de progreso con gradiente semántico y altura configurable
+function Bar({ pct, color, h, bg, showGlow }) {
   const p = Math.min(Math.max(pct || 0, 0), 100);
-  const bc = pct > 90 ? C.rose : pct > 70 ? C.gold : (color || C.mint);
+  const bc = pct > 100 ? C.rose : pct > 85 ? C.gold : (color || C.mint);
   return (
-    <View style={{ height: h || 4, borderRadius: 99, backgroundColor: C.border, overflow: "hidden" }}>
-      <View style={{ height: "100%", width: p + "%", borderRadius: 99, backgroundColor: bc }} />
+    <View style={{ height: h || 5, borderRadius: 99, backgroundColor: bg || C.border, overflow: "hidden" }}>
+      <View style={{
+        height: "100%", width: p + "%", borderRadius: 99, backgroundColor: bc,
+        shadowColor: showGlow ? bc : "transparent",
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.8, shadowRadius: 4,
+      }} />
     </View>
   );
 }
 
-function Tag({ label, color }) {
+// Donut circular para metas / score
+function Donut({ pct, size, strokeWidth, color, children }) {
+  const r = (size - strokeWidth) / 2;
+  const circ = 2 * Math.PI * r;
+  const filled = circ * Math.min(pct / 100, 1);
+  // SVG-like via borderRadius trick
+  const deg = (pct / 100) * 360;
   return (
-    <View style={{ backgroundColor: color + "25", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
-      <Text style={{ fontSize: 11, fontWeight: "700", color }}>{label}</Text>
+    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+      {/* Background ring */}
+      <View style={{ position: "absolute", width: size, height: size, borderRadius: size / 2, borderWidth: strokeWidth, borderColor: C.border2 }} />
+      {/* Progress arc using rotation clipping trick */}
+      <View style={{ position: "absolute", width: size, height: size, borderRadius: size / 2, borderWidth: strokeWidth, borderColor: color,
+        borderTopColor: deg > 90 ? color : "transparent",
+        borderRightColor: deg > 180 ? color : "transparent",
+        borderBottomColor: deg > 270 ? color : "transparent",
+        borderLeftColor: deg > 360 ? color : "transparent",
+        transform: [{ rotate: "-90deg" }],
+        opacity: pct > 0 ? 1 : 0,
+      }} />
+      <View style={{ alignItems: "center", justifyContent: "center" }}>{children}</View>
     </View>
   );
 }
 
-function Section({ sup, title }) {
+function Tag({ label, color, size }) {
+  const fs = size === "sm" ? 10 : 11;
   return (
-    <View style={{ paddingHorizontal: 18, paddingTop: 12, paddingBottom: 10 }}>
-      {!!sup && <Text style={{ fontSize: 10, color: C.t3, letterSpacing: 2, marginBottom: 2 }}>{sup}</Text>}
-      <Text style={{ fontSize: 22, fontWeight: "800", color: C.t1, letterSpacing: -0.5 }}>{title}</Text>
+    <View style={{ backgroundColor: color + "22", borderRadius: 7, borderWidth: 1, borderColor: color + "35", paddingHorizontal: 8, paddingVertical: 3 }}>
+      <Text style={{ fontSize: fs, fontWeight: "700", color, letterSpacing: 0.3 }}>{label}</Text>
+    </View>
+  );
+}
+
+// Separador decorativo
+function Divider({ color }) {
+  return <View style={{ height: 1, backgroundColor: color || C.border, marginVertical: 12 }} />;
+}
+
+function Section({ sup, title, right }) {
+  return (
+    <View style={{ paddingHorizontal: 18, paddingTop: 14, paddingBottom: 10, flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" }}>
+      <View>
+        {!!sup && <Text style={{ fontSize: 10, color: C.t3, letterSpacing: 2.5, marginBottom: 3, textTransform: "uppercase" }}>{sup}</Text>}
+        <Text style={{ fontSize: 22, fontWeight: "800", color: C.t1, letterSpacing: -0.8 }}>{title}</Text>
+      </View>
+      {right}
+    </View>
+  );
+}
+
+// Icono de categoría con fondo de color
+function CatIcon({ cat, size }) {
+  const s = size || 44;
+  const info = CATS[cat] || CATS["Otro"];
+  return (
+    <View style={{ width: s, height: s, borderRadius: s * 0.3, backgroundColor: info.color + "20", borderWidth: 1, borderColor: info.color + "30", alignItems: "center", justifyContent: "center" }}>
+      <Text style={{ fontSize: s * 0.42 }}>{info.icon}</Text>
+    </View>
+  );
+}
+
+// Stat box — para métricas en fila
+function StatBox({ label, value, color, sub, style }) {
+  return (
+    <View style={[{ flex: 1, alignItems: "center", paddingVertical: 12 }, style]}>
+      <Text style={{ fontSize: 18, fontWeight: "800", color: color || C.t1, letterSpacing: -0.5 }}>{value}</Text>
+      <Text style={{ fontSize: 10, color: C.t3, marginTop: 3, letterSpacing: 0.5 }}>{label}</Text>
+      {sub ? <Text style={{ fontSize: 10, color: color || C.t2, marginTop: 1 }}>{sub}</Text> : null}
     </View>
   );
 }
@@ -411,10 +500,133 @@ function Onboarding({ onDone }) {
 }
 
 // ─────────────────────────────────────────────
+// UTILIDADES DE RACHA Y RESUMEN
+// ─────────────────────────────────────────────
+
+// Devuelve los últimos N días como strings YYYY-MM-DD
+function lastNDays(n) {
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (n - 1 - i));
+    return d.toISOString().split("T")[0];
+  });
+}
+
+// Mensaje motivacional basado en racha
+function streakMessage(streak, registeredToday) {
+  if (!registeredToday && streak === 0) return { msg: "Empieza tu racha hoy 💪", sub: "Registra un gasto para comenzar", color: C.t3, emoji: "🌱" };
+  if (!registeredToday && streak > 0) return { msg: `¡No pierdas tu racha de ${streak} días!`, sub: "Registra algo hoy antes de medianoche", color: C.rose, emoji: "⚠️" };
+  if (streak >= 30) return { msg: `${streak} días imparable 🔥`, sub: "Eres una máquina financiera. ¡Increíble!", color: C.gold, emoji: "👑" };
+  if (streak >= 14) return { msg: `${streak} días en racha`, sub: "Dos semanas seguidas. ¡Eso es hábito!", color: C.orange, emoji: "🔥" };
+  if (streak >= 7)  return { msg: `${streak} días seguidos`, sub: "Una semana completa. ¡Sigue así!", color: C.mint, emoji: "🔥" };
+  if (streak >= 3)  return { msg: `${streak} días de racha`, sub: "Vas bien, no lo rompas hoy", color: C.mint, emoji: "🔥" };
+  if (streak === 1) return { msg: "¡Primer día registrado!", sub: "El primer paso es el más importante", color: C.sky, emoji: "✨" };
+  return { msg: "Racha iniciada", sub: "Sigue registrando cada día", color: C.mint, emoji: "🔥" };
+}
+
+// Calcula gastos por semana del mes actual
+function weeklyBreakdown(expenses) {
+  const weeks = [0, 0, 0, 0, 0];
+  expenses.forEach(e => {
+    const d = new Date(e.date);
+    if (d.getMonth() !== TODAY.getMonth() || d.getFullYear() !== TODAY.getFullYear()) return;
+    const wk = Math.min(Math.floor((d.getDate() - 1) / 7), 4);
+    weeks[wk] += e.amount;
+  });
+  return weeks.slice(0, Math.ceil(DAYS_IN_MONTH / 7));
+}
+
+// ─────────────────────────────────────────────
+// STREAK BANNER — estilo Duolingo
+// ─────────────────────────────────────────────
+function StreakBanner({ streakDays = [], onPress }) {
+  const today     = new Date().toISOString().split("T")[0];
+  const streak    = calcStreak(streakDays);
+  const regToday  = streakDays.includes(today);
+  const { msg, sub, color, emoji } = streakMessage(streak, regToday);
+  const last7     = lastNDays(7);
+
+  // Tamaño del fuego según racha
+  const fireSize  = streak >= 14 ? 44 : streak >= 7 ? 40 : streak >= 3 ? 36 : 30;
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.85}
+      style={{
+        marginHorizontal: 16, marginBottom: 14, borderRadius: 22,
+        borderWidth: 1, borderColor: color + "50",
+        backgroundColor: color + "0D",
+        shadowColor: color, shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.2, shadowRadius: 14, elevation: 6,
+        overflow: "hidden",
+      }}
+    >
+      {/* Top row */}
+      <View style={{ flexDirection: "row", alignItems: "center", padding: 16, paddingBottom: 12, gap: 14 }}>
+        {/* Flame icon con ring */}
+        <View style={{
+          width: fireSize + 20, height: fireSize + 20, borderRadius: (fireSize + 20) / 2,
+          backgroundColor: color + "20", borderWidth: 2, borderColor: color + "45",
+          alignItems: "center", justifyContent: "center",
+        }}>
+          <Text style={{ fontSize: fireSize }}>{emoji}</Text>
+        </View>
+        {/* Text */}
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 16, fontWeight: "900", color, letterSpacing: -0.3 }}>{msg}</Text>
+          <Text style={{ fontSize: 11, color: C.t3, marginTop: 3, lineHeight: 15 }}>{sub}</Text>
+        </View>
+        {/* Contador grande */}
+        <View style={{ alignItems: "center" }}>
+          <Text style={{ fontSize: 28, fontWeight: "900", color, letterSpacing: -1 }}>{streak}</Text>
+          <Text style={{ fontSize: 9, color: C.t3, letterSpacing: 1, fontWeight: "700" }}>DÍAS</Text>
+        </View>
+      </View>
+
+      {/* Separador */}
+      <View style={{ height: 1, backgroundColor: color + "25", marginHorizontal: 16 }} />
+
+      {/* Mini calendario últimos 7 días */}
+      <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12 }}>
+        {last7.map((day, i) => {
+          const done      = streakDays.includes(day);
+          const isToday   = day === today;
+          const dayLabel  = new Date(day + "T12:00:00").toLocaleDateString("es", { weekday: "narrow" });
+          const dayNum    = new Date(day + "T12:00:00").getDate();
+          return (
+            <View key={day} style={{ alignItems: "center", gap: 4 }}>
+              <Text style={{ fontSize: 9, color: isToday ? color : C.t3, fontWeight: isToday ? "800" : "400", letterSpacing: 0.5 }}>
+                {dayLabel.toUpperCase()}
+              </Text>
+              <View style={{
+                width: 32, height: 32, borderRadius: 10,
+                backgroundColor: done ? color : (isToday ? color + "18" : C.card2),
+                borderWidth: isToday && !done ? 1.5 : done ? 0 : 1,
+                borderColor: isToday && !done ? color + "60" : C.border,
+                alignItems: "center", justifyContent: "center",
+              }}>
+                {done
+                  ? <Text style={{ fontSize: 14 }}>🔥</Text>
+                  : <Text style={{ fontSize: 12, fontWeight: "700", color: isToday ? color : C.t4 }}>{dayNum}</Text>
+                }
+              </View>
+              {isToday && (
+                <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: done ? color : C.t4 }} />
+              )}
+            </View>
+          );
+        })}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+// ─────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────
 function HomeScreen({ state, openSettings }) {
-  const { expenses, income, budgets, user } = state;
+  const { expenses, income, budgets, user, streakDays = [] } = state;
   const cur = user.currency;
   const totalExp = expenses.reduce((a, e) => a + e.amount, 0);
   const totalInc = income.reduce((a, i) => a + i.amount, 0);
@@ -432,96 +644,159 @@ function HomeScreen({ state, openSettings }) {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={["top"]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
+
         {/* Header */}
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 18, paddingTop: 12, paddingBottom: 14 }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 18, paddingTop: 14, paddingBottom: 10 }}>
           <View>
-            <Text style={{ fontSize: 13, color: C.t3 }}>Hola, <Text style={{ color: C.t1, fontWeight: "700" }}>{user.name}</Text> 👋</Text>
-            <Text style={{ fontSize: 21, fontWeight: "800", color: C.t1 }}>Mi<Text style={{ color: C.mint }}>Finanzas</Text></Text>
+            <Text style={{ fontSize: 12, color: C.t3, letterSpacing: 0.5 }}>Hola, <Text style={{ color: C.t2, fontWeight: "600" }}>{user.name}</Text> 👋</Text>
+            <Text style={{ fontSize: 24, fontWeight: "900", color: C.t1, letterSpacing: -1, marginTop: 1 }}>Mi<Text style={{ color: C.mint }}>Finanzas</Text></Text>
           </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <View style={{ backgroundColor: grade.color + "25", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, flexDirection: "row", alignItems: "center", gap: 5 }}>
-              <Text style={{ fontSize: 13 }}>{grade.emoji}</Text>
-              <Text style={{ fontSize: 13, fontWeight: "700", color: grade.color }}>{sc}pts</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={{ backgroundColor: grade.color + "18", borderRadius: 12, borderWidth: 1, borderColor: grade.color + "40", paddingHorizontal: 11, paddingVertical: 7, flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <Text style={{ fontSize: 14 }}>{grade.emoji}</Text>
+              <Text style={{ fontSize: 14, fontWeight: "800", color: grade.color }}>{sc}pts</Text>
             </View>
-            <TouchableOpacity onPress={openSettings} style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border, alignItems: "center", justifyContent: "center" }}>
+            <TouchableOpacity onPress={openSettings} style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border2, alignItems: "center", justifyContent: "center" }}>
               <Text style={{ fontSize: 18 }}>⚙️</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Balance */}
-        <Card accent style={{ marginBottom: 14 }}>
-          <Text style={{ fontSize: 11, color: C.mint, letterSpacing: 2, marginBottom: 6 }}>BALANCE DISPONIBLE</Text>
-          <Text style={{ fontSize: 40, fontWeight: "800", color: C.mint, letterSpacing: -1, lineHeight: 46 }}>{money(balance, cur)}</Text>
-          <View style={{ flexDirection: "row", gap: 0, marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: C.mint + "25" }}>
-            {[[money(totalInc, cur), "Ingresos", C.mint], [money(totalExp, cur), "Gastos", C.rose], [savePct + "%", "Ahorro", C.gold]].map(([v, l, c], i) => (
-              <View key={l} style={{ flex: 1, borderRightWidth: i < 2 ? 1 : 0, borderRightColor: C.mint + "25", paddingHorizontal: i > 0 ? 12 : 0 }}>
-                <Text style={{ fontSize: 11, color: C.t3, marginBottom: 3 }}>{l}</Text>
-                <Text style={{ fontSize: 14, fontWeight: "700", color: c }}>{v}</Text>
+        {/* Hero Balance Card */}
+        <View style={{ marginHorizontal: 16, marginBottom: 14, borderRadius: 24, overflow: "hidden", borderWidth: 1, borderColor: C.mint + "40",
+          shadowColor: C.mint, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 8 }}>
+          <View style={{ backgroundColor: "#00140F", padding: 20, paddingBottom: 0 }}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <View>
+                <Text style={{ fontSize: 10, color: C.mint, letterSpacing: 3, fontWeight: "700", marginBottom: 6 }}>BALANCE DISPONIBLE</Text>
+                <Text style={{ fontSize: 42, fontWeight: "900", color: C.mint, letterSpacing: -2, lineHeight: 48 }}>{money(balance, cur)}</Text>
+              </View>
+              <View style={{ backgroundColor: C.mintBg2, borderRadius: 14, borderWidth: 1, borderColor: C.mint + "30", padding: 10 }}>
+                <Text style={{ fontSize: 24 }}>💰</Text>
+              </View>
+            </View>
+            {/* Savings progress bar */}
+            <View style={{ marginTop: 14, marginBottom: 0 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
+                <Text style={{ fontSize: 11, color: C.t3 }}>Tasa de ahorro</Text>
+                <Text style={{ fontSize: 11, fontWeight: "700", color: savePct >= 20 ? C.mint : savePct >= 10 ? C.gold : C.rose }}>{savePct}%</Text>
+              </View>
+              <Bar pct={savePct} color={savePct >= 20 ? C.mint : savePct >= 10 ? C.gold : C.rose} h={6} showGlow />
+            </View>
+          </View>
+          {/* Stats row */}
+          <View style={{ backgroundColor: "#001A14", flexDirection: "row", borderTopWidth: 1, borderTopColor: C.mint + "20" }}>
+            {[
+              [money(totalInc, cur), "Ingresos", C.mint],
+              [money(totalExp, cur), "Gastos",   C.rose],
+              [savePct + "%",        "Ahorro",   savePct >= 20 ? C.gold : C.t2],
+            ].map(([v, l, c], i) => (
+              <View key={l} style={{ flex: 1, paddingVertical: 14, alignItems: "center", borderRightWidth: i < 2 ? 1 : 0, borderRightColor: C.mint + "20" }}>
+                <Text style={{ fontSize: 15, fontWeight: "800", color: c, letterSpacing: -0.3 }}>{v}</Text>
+                <Text style={{ fontSize: 10, color: C.t3, marginTop: 3, letterSpacing: 0.5 }}>{l}</Text>
               </View>
             ))}
           </View>
-        </Card>
+        </View>
 
-        {/* Alertas */}
+        {/* Streak Banner — Duolingo style */}
+        <StreakBanner streakDays={streakDays} onPress={openSettings} />
+
+        {/* Alertas de presupuesto */}
         {alerts.length > 0 && (
-          <Card style={{ marginBottom: 14 }}>
-            <Text style={{ fontSize: 13, fontWeight: "700", color: C.gold, marginBottom: 12 }}>⚡ Alertas de Presupuesto</Text>
-            {alerts.map(({ cat, pct }) => (
-              <View key={cat} style={{ marginBottom: 12 }}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                  <Text style={{ fontSize: 13, color: C.t1 }}>{CATS[cat]?.icon} {cat}</Text>
-                  <Tag label={Math.round(pct) + "%"} color={pct > 100 ? C.rose : C.gold} />
+          <Card danger={alerts.some(a => a.pct > 100)} style={{ marginBottom: 14, borderColor: C.gold + "45" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: C.goldBg2, alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: 16 }}>⚡</Text>
+              </View>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: C.gold }}>Alertas de Presupuesto</Text>
+            </View>
+            {alerts.map(({ cat, pct }, idx) => (
+              <View key={cat}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                  <CatIcon cat={cat} size={36} />
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+                      <Text style={{ fontSize: 13, fontWeight: "600", color: C.t1 }}>{cat}</Text>
+                      <Tag label={Math.round(pct) + "%"} color={pct > 100 ? C.rose : C.gold} />
+                    </View>
+                    <Bar pct={pct} color={CATS[cat]?.color} h={6} showGlow />
+                  </View>
                 </View>
-                <Bar pct={pct} color={CATS[cat]?.color} />
+                {idx < alerts.length - 1 && <Divider />}
               </View>
             ))}
           </Card>
         )}
 
-        {/* Gastos */}
+        {/* Gastos del mes — barras horizontales con color por categoría */}
         {Object.keys(ct).length > 0 && (
           <Card style={{ marginBottom: 14 }}>
-            <Text style={{ fontSize: 13, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Gastos del mes</Text>
-            {Object.entries(ct).sort((a, b) => b[1] - a[1]).map(([cat, amt]) => (
-              <View key={cat} style={{ marginBottom: 12 }}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: (CATS[cat]?.color || C.mint) + "20", alignItems: "center", justifyContent: "center" }}>
-                      <Text style={{ fontSize: 14 }}>{CATS[cat]?.icon}</Text>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Gastos del mes</Text>
+              <Tag label={money(totalExp, cur)} color={C.rose} />
+            </View>
+            {Object.entries(ct).sort((a, b) => b[1] - a[1]).map(([cat, amt], idx) => {
+              const info = CATS[cat] || CATS["Otro"];
+              const pct = totalExp > 0 ? (amt / totalExp) * 100 : 0;
+              return (
+                <View key={cat} style={{ marginBottom: idx < Object.keys(ct).length - 1 ? 14 : 0 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 7 }}>
+                    <CatIcon cat={cat} size={38} />
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
+                        <Text style={{ fontSize: 13, fontWeight: "600", color: C.t2 }}>{cat}</Text>
+                        <Text style={{ fontSize: 13, fontWeight: "800", color: C.t1 }}>{money(amt, cur)}</Text>
+                      </View>
+                      <Bar pct={(amt / maxCat) * 100} color={info.color} h={5} showGlow />
                     </View>
-                    <Text style={{ fontSize: 13, color: C.t2 }}>{cat}</Text>
+                    <Text style={{ fontSize: 11, color: C.t3, width: 34, textAlign: "right" }}>{Math.round(pct)}%</Text>
                   </View>
-                  <Text style={{ fontSize: 13, fontWeight: "700", color: C.t1 }}>{money(amt, cur)}</Text>
                 </View>
-                <Bar pct={(amt / maxCat) * 100} color={CATS[cat]?.color} h={3} />
-              </View>
-            ))}
+              );
+            })}
           </Card>
         )}
 
-        {/* Movimientos */}
-        <Card>
-          <Text style={{ fontSize: 13, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Ultimos movimientos</Text>
-          {expenses.length === 0
-            ? <Text style={{ fontSize: 13, color: C.t3, textAlign: "center", paddingVertical: 20 }}>Sin movimientos. Usa el Asistente IA para registrar.</Text>
-            : expenses.slice(0, 6).map((e, i) => (
-              <View key={e.id}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                  <View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: C.card2, alignItems: "center", justifyContent: "center" }}>
-                    <Text style={{ fontSize: 19 }}>{CATS[e.cat]?.icon || "💸"}</Text>
+        {/* Últimos movimientos */}
+        <Card style={{ marginBottom: 14 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Últimos movimientos</Text>
+            {expenses.length > 0 && <Tag label={expenses.length + " registros"} color={C.t3} />}
+          </View>
+          {expenses.length === 0 ? (
+            <View style={{ alignItems: "center", paddingVertical: 28 }}>
+              <Text style={{ fontSize: 36, marginBottom: 10 }}>📝</Text>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: C.t2, marginBottom: 4 }}>Sin movimientos aún</Text>
+              <Text style={{ fontSize: 12, color: C.t3, textAlign: "center", lineHeight: 18 }}>Usa el Asistente IA para{"\n"}registrar tus gastos</Text>
+            </View>
+          ) : (
+            expenses.slice(0, 6).map((e, i) => {
+              const info = CATS[e.cat] || CATS["Otro"];
+              return (
+                <View key={e.id}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                    <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: info.color + "18", borderWidth: 1, borderColor: info.color + "30", alignItems: "center", justifyContent: "center" }}>
+                      <Text style={{ fontSize: 20 }}>{info.icon}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: "700", color: C.t1 }} numberOfLines={1}>{e.desc}</Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: info.color }} />
+                        <Text style={{ fontSize: 10, color: C.t3 }}>{e.cat} · {e.date}</Text>
+                      </View>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      <Text style={{ fontSize: 15, fontWeight: "800", color: C.rose }}>-{money(e.amount, cur)}</Text>
+                    </View>
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 13, fontWeight: "600", color: C.t1 }} numberOfLines={1}>{e.desc}</Text>
-                    <Text style={{ fontSize: 11, color: C.t3, marginTop: 1 }}>{e.date}</Text>
-                  </View>
-                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.rose }}>-{money(e.amount, cur)}</Text>
+                  {i < Math.min(expenses.length, 6) - 1 && <View style={{ height: 1, backgroundColor: C.border, marginVertical: 11, marginLeft: 56 }} />}
                 </View>
-                {i < Math.min(expenses.length, 6) - 1 && <View style={{ height: 1, backgroundColor: C.border, marginVertical: 10, marginLeft: 54 }} />}
-              </View>
-            ))
-          }
+              );
+            })
+          )}
         </Card>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -668,32 +943,54 @@ function DeudasScreen({ state, setDebts }) {
             )}
             {debts.map(d => {
               const t = TYPES.find(x => x.id === d.type) || TYPES[5];
+              const dc = d.color || t.color;
               const pctPaid = d.limit > 0 ? Math.round(((d.limit - d.balance) / d.limit) * 100) : 0;
               const mo = payoffMonths(d.balance, d.rate, d.minPay + Number(extra || 0));
               const tl = mo === Infinity ? "Solo intereses" : mo > 24 ? (mo / 12).toFixed(1) + " años" : mo + " meses";
               return (
-                <Card key={d.id} style={{ marginBottom: 12, borderLeftWidth: 3, borderLeftColor: d.color || t.color }}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                      <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: (d.color || t.color) + "20", alignItems: "center", justifyContent: "center" }}><Text style={{ fontSize: 18 }}>{t.icon}</Text></View>
-                      <View><Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>{d.name}</Text><Tag label={t.label} color={d.color || t.color} /></View>
-                    </View>
-                    <TouchableOpacity onPress={() => setDebts(debts.filter(x => x.id !== d.id))} style={{ padding: 6 }}><Text style={{ color: C.t4, fontSize: 20 }}>×</Text></TouchableOpacity>
-                  </View>
-                  <View style={{ flexDirection: "row", gap: 0, marginBottom: 14 }}>
-                    {[["Saldo", money(d.balance, cur), C.rose], ["Tasa", d.rate + "% anual", C.gold], ["Min/mes", money(d.minPay, cur), C.t1]].map(([l, v, c], i) => (
-                      <View key={l} style={{ flex: 1, borderRightWidth: i < 2 ? 1 : 0, borderRightColor: C.border, paddingRight: i < 2 ? 12 : 0, paddingLeft: i > 0 ? 12 : 0 }}>
-                        <Text style={{ fontSize: 10, color: C.t3, marginBottom: 3 }}>{l}</Text>
-                        <Text style={{ fontSize: 13, fontWeight: "700", color: c }}>{v}</Text>
+                <View key={d.id} style={{ marginHorizontal: 16, marginBottom: 14, borderRadius: 22, overflow: "hidden", borderWidth: 1, borderColor: dc + "45",
+                  shadowColor: dc, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 12 }}>
+                  <View style={{ backgroundColor: dc + "0C", padding: 16 }}>
+                    {/* Top row */}
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                        <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: dc + "22", borderWidth: 1.5, borderColor: dc + "40", alignItems: "center", justifyContent: "center" }}>
+                          <Text style={{ fontSize: 20 }}>{t.icon}</Text>
+                        </View>
+                        <View>
+                          <Text style={{ fontSize: 15, fontWeight: "800", color: C.t1 }}>{d.name}</Text>
+                          <Tag label={t.label} color={dc} size="sm" />
+                        </View>
                       </View>
-                    ))}
+                      <TouchableOpacity onPress={() => setDebts(debts.filter(x => x.id !== d.id))} style={{ padding: 6, borderRadius: 10, backgroundColor: C.roseBg }}>
+                        <Text style={{ color: C.rose, fontSize: 16, fontWeight: "700" }}>×</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {/* Stats */}
+                    <View style={{ flexDirection: "row", gap: 0, marginBottom: 12, backgroundColor: C.bg + "80", borderRadius: 14, overflow: "hidden" }}>
+                      {[["Saldo", money(d.balance, cur), C.rose], ["Tasa", d.rate + "% anual", C.gold], ["Mín/mes", money(d.minPay, cur), C.t1]].map(([l, v, c], i) => (
+                        <View key={l} style={{ flex: 1, paddingVertical: 10, alignItems: "center", borderRightWidth: i < 2 ? 1 : 0, borderRightColor: C.border2 }}>
+                          <Text style={{ fontSize: 12, fontWeight: "800", color: c }}>{v}</Text>
+                          <Text style={{ fontSize: 10, color: C.t3, marginTop: 2 }}>{l}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    {/* Progress paid */}
+                    {d.limit > 0 && (
+                      <View style={{ marginBottom: 10 }}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
+                          <Text style={{ fontSize: 11, color: C.t3 }}>Progreso de pago</Text>
+                          <Text style={{ fontSize: 11, color: dc, fontWeight: "700" }}>{pctPaid}% pagado</Text>
+                        </View>
+                        <Bar pct={pctPaid} color={dc} h={6} showGlow />
+                      </View>
+                    )}
+                    <View style={{ backgroundColor: dc + "14", borderRadius: 12, padding: 10, borderWidth: 1, borderColor: dc + "25", flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                      <Text style={{ fontSize: 12, color: C.t2 }}>⏱ Libre en: <Text style={{ color: dc, fontWeight: "700" }}>{tl}</Text></Text>
+                      {d.rate > 0 && <Text style={{ fontSize: 11, color: C.t3 }}><Text style={{ color: C.rose, fontWeight: "700" }}>{money(Math.round(d.balance * d.rate / 100), cur)}</Text>/año</Text>}
+                    </View>
                   </View>
-                  {d.limit > 0 && <View style={{ marginBottom: 12 }}><View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}><Text style={{ fontSize: 11, color: C.t3 }}>Progreso de pago</Text><Text style={{ fontSize: 11, color: C.mint, fontWeight: "700" }}>{pctPaid}% pagado</Text></View><Bar pct={pctPaid} color={C.mint} /></View>}
-                  <View style={{ backgroundColor: C.card2, borderRadius: 10, padding: 10, flexDirection: "row", justifyContent: "space-between" }}>
-                    <Text style={{ fontSize: 12, color: C.t2 }}>Libre en: <Text style={{ color: C.mint, fontWeight: "700" }}>{tl}</Text></Text>
-                    {d.rate > 0 && <Text style={{ fontSize: 12, color: C.t2 }}><Text style={{ color: C.rose, fontWeight: "700" }}>{money(Math.round(d.balance * d.rate / 100), cur)}</Text>/año</Text>}
-                  </View>
-                </Card>
+                </View>
               );
             })}
             {adding ? (
@@ -791,27 +1088,58 @@ function MetasScreen({ state, setGoals }) {
             <Text style={{ fontSize: 13, color: C.t3, textAlign: "center" }}>Agrega tu primer objetivo y empieza a ahorrar con proposito.</Text>
           </Card>
         )}
-        {goals.map(g => {
+        {goals.map((g, gIdx) => {
           const pct = Math.min((g.saved / g.target) * 100, 100);
           const weekly = ((g.target - g.saved) / g.weeks).toFixed(0);
+          const goalColors = [C.mint, C.sky, C.violet, C.gold, C.orange, C.pink];
+          const gColor = goalColors[gIdx % goalColors.length];
           return (
-            <Card key={g.id} accent style={{ marginBottom: 12 }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                  <View style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: C.mintBg, borderWidth: 1, borderColor: C.mint + "40", alignItems: "center", justifyContent: "center" }}><Text style={{ fontSize: 22 }}>{g.emoji}</Text></View>
-                  <View><Text style={{ fontSize: 15, fontWeight: "700", color: C.t1 }}>{g.name}</Text><Text style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{cur}{g.saved.toLocaleString()} de {cur}{g.target.toLocaleString()}</Text></View>
+            <View key={g.id} style={{ marginHorizontal: 16, marginBottom: 14, borderRadius: 22, overflow: "hidden", borderWidth: 1, borderColor: gColor + "45",
+              shadowColor: gColor, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 14 }}>
+              <View style={{ backgroundColor: gColor + "0E", padding: 18 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                    <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: gColor + "22", borderWidth: 1.5, borderColor: gColor + "45", alignItems: "center", justifyContent: "center" }}>
+                      <Text style={{ fontSize: 24 }}>{g.emoji}</Text>
+                    </View>
+                    <View>
+                      <Text style={{ fontSize: 16, fontWeight: "800", color: C.t1, letterSpacing: -0.3 }}>{g.name}</Text>
+                      <Text style={{ fontSize: 11, color: C.t3, marginTop: 3 }}>{cur}{g.saved.toLocaleString()} ahorrado</Text>
+                    </View>
+                  </View>
+                  <View style={{ alignItems: "flex-end", gap: 8 }}>
+                    <View style={{ backgroundColor: gColor + "22", borderRadius: 10, borderWidth: 1, borderColor: gColor + "40", paddingHorizontal: 10, paddingVertical: 5 }}>
+                      <Text style={{ fontSize: 14, fontWeight: "900", color: gColor }}>{Math.round(pct)}%</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setGoals(goals.filter(x => x.id !== g.id))}>
+                      <Text style={{ fontSize: 11, color: C.t4 }}>eliminar</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                <View style={{ alignItems: "flex-end", gap: 6 }}>
-                  <Tag label={Math.round(pct) + "%"} color={C.mint} />
-                  <TouchableOpacity onPress={() => setGoals(goals.filter(x => x.id !== g.id))}><Text style={{ fontSize: 11, color: C.t4 }}>eliminar</Text></TouchableOpacity>
+                {/* Progress bar grande */}
+                <View style={{ marginBottom: 4 }}>
+                  <Bar pct={pct} color={gColor} h={8} showGlow />
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 5 }}>
+                    <Text style={{ fontSize: 10, color: C.t3 }}>{cur}{g.saved.toLocaleString()}</Text>
+                    <Text style={{ fontSize: 10, color: gColor, fontWeight: "700" }}>{cur}{g.target.toLocaleString()}</Text>
+                  </View>
                 </View>
               </View>
-              <Bar pct={pct} color={C.mint} h={6} style={{ marginBottom: 12 }} />
-              <View style={{ backgroundColor: C.card2, borderRadius: 10, padding: 12, flexDirection: "row", justifyContent: "space-between" }}>
-                <View><Text style={{ fontSize: 10, color: C.t3 }}>Aparta por semana</Text><Text style={{ fontSize: 14, fontWeight: "700", color: C.mint }}>{cur}{Number(weekly).toLocaleString()}</Text></View>
-                <View style={{ alignItems: "flex-end" }}><Text style={{ fontSize: 10, color: C.t3 }}>Faltan</Text><Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>{cur}{(g.target - g.saved).toLocaleString()}</Text></View>
+              <View style={{ flexDirection: "row", backgroundColor: gColor + "14", borderTopWidth: 1, borderTopColor: gColor + "25" }}>
+                <View style={{ flex: 1, paddingVertical: 13, alignItems: "center", borderRightWidth: 1, borderRightColor: gColor + "20" }}>
+                  <Text style={{ fontSize: 15, fontWeight: "800", color: gColor }}>{cur}{Number(weekly).toLocaleString()}</Text>
+                  <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Por semana</Text>
+                </View>
+                <View style={{ flex: 1, paddingVertical: 13, alignItems: "center", borderRightWidth: 1, borderRightColor: gColor + "20" }}>
+                  <Text style={{ fontSize: 15, fontWeight: "800", color: C.t1 }}>{cur}{(g.target - g.saved).toLocaleString()}</Text>
+                  <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Faltante</Text>
+                </View>
+                <View style={{ flex: 1, paddingVertical: 13, alignItems: "center" }}>
+                  <Text style={{ fontSize: 15, fontWeight: "800", color: C.t2 }}>{g.weeks}s</Text>
+                  <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Plazo</Text>
+                </View>
               </View>
-            </Card>
+            </View>
           );
         })}
         {adding ? (
@@ -889,50 +1217,305 @@ function HerramientasScreen({ state, setReminders }) {
         <Text style={{ fontSize: 22, fontWeight: "800", color: C.t1 }}>Herramientas 🛠️</Text>
       </View>
       <View style={{ flexDirection: "row", marginHorizontal: 16, marginBottom: 10, backgroundColor: C.card, borderRadius: 14, padding: 4, borderWidth: 1, borderColor: C.border }}>
-        {[["score","🌡️ Score"],["predictor","🔮 Predictor"],["pagos","🔔 Pagos"]].map(([id, label]) => (
+        {[["score","🌡️ Score"],["resumen","📅 Resumen"],["predictor","🔮 Predictor"],["pagos","🔔 Pagos"]].map(([id, label]) => (
           <TouchableOpacity key={id} onPress={() => setSub(id)} style={{ flex: 1, paddingVertical: 9, borderRadius: 11, backgroundColor: sub === id ? C.card2 : "transparent", alignItems: "center" }}>
-            <Text style={{ fontSize: 11, fontWeight: "700", color: sub === id ? C.t1 : C.t3 }}>{label}</Text>
+            <Text style={{ fontSize: 10, fontWeight: "700", color: sub === id ? C.t1 : C.t3 }}>{label}</Text>
           </TouchableOpacity>
         ))}
       </View>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
 
+        {sub === "resumen" && (() => {
+          const weeklyExp   = weeklyBreakdown(expenses);
+          const maxWeek     = Math.max(...weeklyExp, 1);
+          const weekNames   = ["Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5"];
+          const bestWeekIdx = weeklyExp.indexOf(Math.min(...weeklyExp.filter(w => w > 0)));
+          const worstWeekIdx= weeklyExp.indexOf(Math.max(...weeklyExp));
+          const today       = new Date().toISOString().split("T")[0];
+          const regToday    = (streakDays || []).includes(today);
+          const streak      = calcStreak(streakDays || []);
+          const { msg: smsg, color: scol, emoji: semoji } = streakMessage(streak, regToday);
+          const last30      = lastNDays(30);
+          const totalInc30  = income.reduce((a, i) => a + i.amount, 0);
+          const totalExp30  = expenses.reduce((a, e) => a + e.amount, 0);
+          const savePct30   = totalInc30 > 0 ? Math.round(((totalInc30 - totalExp30) / totalInc30) * 100) : 0;
+
+          // Días registrados este mes
+          const thisMonth   = TODAY.toISOString().slice(0, 7);
+          const daysThisMonth = (streakDays || []).filter(d => d.startsWith(thisMonth)).length;
+          const consistency = Math.round((daysThisMonth / DAY) * 100);
+
+          // Categoría más gastada
+          const ct30 = {};
+          expenses.forEach(e => { ct30[e.cat] = (ct30[e.cat] || 0) + e.amount; });
+          const topCat = Object.entries(ct30).sort((a, b) => b[1] - a[1])[0];
+
+          // Tendencia: comparar primera mitad del mes vs segunda
+          const firstHalf  = expenses.filter(e => new Date(e.date).getDate() <= 15).reduce((a, e) => a + e.amount, 0);
+          const secondHalf = expenses.filter(e => new Date(e.date).getDate() > 15).reduce((a, e) => a + e.amount, 0);
+          const trending   = secondHalf > firstHalf * 1.2 ? "up" : secondHalf < firstHalf * 0.8 ? "down" : "stable";
+          const trendInfo  = trending === "up"
+            ? { label: "Gasto acelerando", color: C.rose, icon: "📈", desc: "Gastas más en la segunda quincena" }
+            : trending === "down"
+            ? { label: "Gasto desacelerando", color: C.mint, icon: "📉", desc: "Excelente control en la segunda quincena" }
+            : { label: "Gasto estable", color: C.sky, icon: "➡️", desc: "Tu ritmo de gasto es consistente" };
+
+          return (
+            <>
+              {/* Mini Streak Card */}
+              <StreakBanner streakDays={streakDays || []} onPress={() => {}} />
+
+              {/* Resumen del Mes */}
+              <View style={{ marginHorizontal: 16, marginBottom: 14, borderRadius: 22, overflow: "hidden", borderWidth: 1, borderColor: C.violet + "40",
+                shadowColor: C.violet, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 14 }}>
+                <View style={{ backgroundColor: C.violet + "0C", padding: 18, paddingBottom: 0 }}>
+                  <Text style={{ fontSize: 10, color: C.violet, letterSpacing: 2.5, fontWeight: "700", marginBottom: 12 }}>RESUMEN DEL MES</Text>
+                  <View style={{ flexDirection: "row", gap: 10, marginBottom: 16 }}>
+                    {[
+                      [daysThisMonth + "/" + DAY, "Días activos", C.mint],
+                      [consistency + "%",          "Consistencia", consistency >= 70 ? C.mint : consistency >= 40 ? C.gold : C.rose],
+                      [streak + " 🔥",             "Racha actual", scol],
+                    ].map(([v, l, c]) => (
+                      <View key={l} style={{ flex: 1, backgroundColor: c + "12", borderRadius: 14, borderWidth: 1, borderColor: c + "30", padding: 12, alignItems: "center" }}>
+                        <Text style={{ fontSize: 18, fontWeight: "900", color: c }}>{v}</Text>
+                        <Text style={{ fontSize: 10, color: C.t3, marginTop: 4, textAlign: "center" }}>{l}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+                <View style={{ flexDirection: "row", backgroundColor: C.violet + "12", borderTopWidth: 1, borderTopColor: C.violet + "25" }}>
+                  <View style={{ flex: 1, paddingVertical: 13, alignItems: "center", borderRightWidth: 1, borderRightColor: C.violet + "20" }}>
+                    <Text style={{ fontSize: 15, fontWeight: "800", color: C.rose }}>{money(totalExp30, user.currency)}</Text>
+                    <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Total gastado</Text>
+                  </View>
+                  <View style={{ flex: 1, paddingVertical: 13, alignItems: "center" }}>
+                    <Text style={{ fontSize: 15, fontWeight: "800", color: savePct30 >= 20 ? C.mint : C.gold }}>{savePct30}%</Text>
+                    <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Ahorro del mes</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Gráfica de barras semanal */}
+              {weeklyExp.some(w => w > 0) && (
+                <Card style={{ marginBottom: 14 }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+                    <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Gasto por semana</Text>
+                    <Tag label={money(totalExp30, user.currency)} color={C.rose} />
+                  </View>
+                  <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, height: 100 }}>
+                    {weeklyExp.map((w, i) => {
+                      const h     = maxWeek > 0 ? Math.max((w / maxWeek) * 80, w > 0 ? 8 : 0) : 0;
+                      const isBest  = i === bestWeekIdx && w > 0;
+                      const isWorst = i === worstWeekIdx && weeklyExp.filter(x => x > 0).length > 1;
+                      const barCol  = isBest ? C.mint : isWorst ? C.rose : C.sky;
+                      return (
+                        <View key={i} style={{ flex: 1, alignItems: "center", justifyContent: "flex-end", height: 100 }}>
+                          {(isBest || isWorst) && (
+                            <Text style={{ fontSize: 8, color: barCol, fontWeight: "700", marginBottom: 3, letterSpacing: 0.3 }}>
+                              {isBest ? "MEJOR" : "MAYOR"}
+                            </Text>
+                          )}
+                          <View style={{
+                            width: "100%", height: h, borderRadius: 8,
+                            backgroundColor: barCol,
+                            shadowColor: barCol, shadowOffset: { width: 0, height: 0 },
+                            shadowOpacity: isBest || isWorst ? 0.6 : 0.2, shadowRadius: 6,
+                            opacity: w === 0 ? 0.15 : 1,
+                          }} />
+                          <Text style={{ fontSize: 9, color: i === Math.floor((DAY - 1) / 7) ? C.t1 : C.t3, marginTop: 5, fontWeight: "600" }}>
+                            {weekNames[i]}
+                          </Text>
+                          {w > 0 && (
+                            <Text style={{ fontSize: 8, color: barCol, fontWeight: "700", marginTop: 1 }}>
+                              {money(w, user.currency)}
+                            </Text>
+                          )}
+                        </View>
+                      );
+                    })}
+                  </View>
+                  {weeklyExp.filter(w => w > 0).length > 1 && (
+                    <View style={{ marginTop: 14, flexDirection: "row", gap: 10 }}>
+                      <View style={{ flex: 1, backgroundColor: C.mintBg2, borderRadius: 10, padding: 10, flexDirection: "row", gap: 6, alignItems: "center" }}>
+                        <Text style={{ fontSize: 14 }}>✅</Text>
+                        <View>
+                          <Text style={{ fontSize: 11, fontWeight: "700", color: C.mint }}>Mejor semana</Text>
+                          <Text style={{ fontSize: 10, color: C.t3 }}>{weekNames[bestWeekIdx]}: {money(weeklyExp[bestWeekIdx], user.currency)}</Text>
+                        </View>
+                      </View>
+                      <View style={{ flex: 1, backgroundColor: C.roseBg2, borderRadius: 10, padding: 10, flexDirection: "row", gap: 6, alignItems: "center" }}>
+                        <Text style={{ fontSize: 14 }}>⚠️</Text>
+                        <View>
+                          <Text style={{ fontSize: 11, fontWeight: "700", color: C.rose }}>Mayor gasto</Text>
+                          <Text style={{ fontSize: 10, color: C.t3 }}>{weekNames[worstWeekIdx]}: {money(weeklyExp[worstWeekIdx], user.currency)}</Text>
+                        </View>
+                      </View>
+                    </View>
+                  )}
+                </Card>
+              )}
+
+              {/* Tendencia de gasto */}
+              <Card style={{ marginBottom: 14, borderColor: trendInfo.color + "40" }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                  <View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: trendInfo.color + "18", borderWidth: 1, borderColor: trendInfo.color + "35", alignItems: "center", justifyContent: "center" }}>
+                    <Text style={{ fontSize: 22 }}>{trendInfo.icon}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 14, fontWeight: "800", color: trendInfo.color }}>{trendInfo.label}</Text>
+                    <Text style={{ fontSize: 11, color: C.t3, marginTop: 3, lineHeight: 16 }}>{trendInfo.desc}</Text>
+                  </View>
+                </View>
+                <View style={{ marginTop: 14, flexDirection: "row", gap: 10 }}>
+                  <View style={{ flex: 1, backgroundColor: C.card2, borderRadius: 10, padding: 10 }}>
+                    <Text style={{ fontSize: 10, color: C.t3, marginBottom: 3 }}>1ra quincena</Text>
+                    <Text style={{ fontSize: 14, fontWeight: "800", color: C.t1 }}>{money(firstHalf, user.currency)}</Text>
+                  </View>
+                  <View style={{ flex: 1, backgroundColor: C.card2, borderRadius: 10, padding: 10 }}>
+                    <Text style={{ fontSize: 10, color: C.t3, marginBottom: 3 }}>2da quincena</Text>
+                    <Text style={{ fontSize: 14, fontWeight: "800", color: trending === "up" ? C.rose : trending === "down" ? C.mint : C.t1 }}>{money(secondHalf, user.currency)}</Text>
+                  </View>
+                </View>
+              </Card>
+
+              {/* Categoría estrella y peor */}
+              {topCat && (
+                <Card style={{ marginBottom: 14 }}>
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Protagonista del mes</Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                    <CatIcon cat={topCat[0]} size={52} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 16, fontWeight: "800", color: C.t1 }}>{topCat[0]}</Text>
+                      <Text style={{ fontSize: 12, color: C.t3, marginTop: 3 }}>Tu mayor gasto este mes</Text>
+                      <View style={{ marginTop: 8 }}>
+                        <Bar pct={totalExp30 > 0 ? (topCat[1] / totalExp30) * 100 : 0} color={CATS[topCat[0]]?.color || C.mint} h={6} showGlow />
+                      </View>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      <Text style={{ fontSize: 16, fontWeight: "900", color: CATS[topCat[0]]?.color || C.mint }}>{money(topCat[1], user.currency)}</Text>
+                      <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>
+                        {totalExp30 > 0 ? Math.round((topCat[1] / totalExp30) * 100) : 0}% del total
+                      </Text>
+                    </View>
+                  </View>
+                </Card>
+              )}
+
+              {/* Calendario de actividad — últimos 30 días */}
+              <Card style={{ marginBottom: 14 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Actividad del mes</Text>
+                  <Tag label={daysThisMonth + " días activos"} color={C.mint} />
+                </View>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 5 }}>
+                  {Array.from({ length: DAYS_IN_MONTH }, (_, i) => {
+                    const dayNum = i + 1;
+                    const dayStr = `${TODAY.getFullYear()}-${String(TODAY.getMonth() + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
+                    const done   = (streakDays || []).includes(dayStr);
+                    const isPast = dayNum <= DAY;
+                    const isT    = dayNum === DAY;
+                    return (
+                      <View key={dayNum} style={{
+                        width: 28, height: 28, borderRadius: 8,
+                        backgroundColor: done ? C.mint : isT ? C.mintBg2 : isPast ? C.card3 : C.card2,
+                        borderWidth: isT ? 1.5 : 0,
+                        borderColor: isT ? C.mint + "80" : "transparent",
+                        alignItems: "center", justifyContent: "center",
+                      }}>
+                        {done
+                          ? <Text style={{ fontSize: 12 }}>🔥</Text>
+                          : <Text style={{ fontSize: 10, color: isPast ? C.t4 : C.t5, fontWeight: "600" }}>{dayNum}</Text>
+                        }
+                      </View>
+                    );
+                  })}
+                </View>
+                <View style={{ flexDirection: "row", gap: 16, marginTop: 12, justifyContent: "center" }}>
+                  {[[C.mint, "🔥", "Registrado"], [C.card3, null, "Sin registro"], [C.card2, null, "Futuro"]].map(([col, ic, lab]) => (
+                    <View key={lab} style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                      <View style={{ width: 14, height: 14, borderRadius: 4, backgroundColor: col, alignItems: "center", justifyContent: "center" }}>
+                        {ic && <Text style={{ fontSize: 8 }}>{ic}</Text>}
+                      </View>
+                      <Text style={{ fontSize: 10, color: C.t3 }}>{lab}</Text>
+                    </View>
+                  ))}
+                </View>
+              </Card>
+            </>
+          );
+        })()}
+
         {sub === "score" && (
           <>
-            <Card accent style={{ alignItems: "center", paddingVertical: 28 }}>
-              <Text style={{ fontSize: 28, marginBottom: 8 }}>{grade.emoji}</Text>
-              <Text style={{ fontSize: 60, fontWeight: "800", color: grade.color, letterSpacing: -2, lineHeight: 65 }}>{total}</Text>
-              <Text style={{ fontSize: 13, color: C.t3, marginBottom: 8 }}>puntos de 100</Text>
-              <Tag label={grade.label} color={grade.color} />
-              <Text style={{ fontSize: 12, color: C.t3, marginTop: 10, textAlign: "center" }}>Tu salud financiera este mes</Text>
-            </Card>
-            <Card style={{ marginBottom: 12 }}>
-              <Text style={{ fontSize: 13, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Desglose del Score</Text>
-              {[["💰 Tasa de ahorro", s.ahorro, C.mint], ["📊 Control", s.presupuesto, C.sky], ["📝 Registro", s.consistencia, C.violet], ["💳 Manejo de deudas", s.deuda, C.gold]].map(([label, val, color]) => (
-                <View key={label} style={{ marginBottom: 12 }}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
-                    <Text style={{ fontSize: 12, color: C.t2 }}>{label}</Text>
-                    <Text style={{ fontSize: 12, fontWeight: "700", color }}>{Math.round(val)}pts</Text>
+            {/* Score Hero */}
+            <View style={{ marginHorizontal: 16, marginBottom: 14, borderRadius: 24, overflow: "hidden", borderWidth: 1, borderColor: grade.color + "45",
+              shadowColor: grade.color, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 20, elevation: 8 }}>
+              <View style={{ backgroundColor: grade.color + "0C", padding: 28, alignItems: "center" }}>
+                <Text style={{ fontSize: 32, marginBottom: 10 }}>{grade.emoji}</Text>
+                <Text style={{ fontSize: 72, fontWeight: "900", color: grade.color, letterSpacing: -3, lineHeight: 76 }}>{total}</Text>
+                <Text style={{ fontSize: 13, color: C.t3, marginTop: 2, letterSpacing: 0.5 }}>puntos de 100</Text>
+                <View style={{ marginTop: 12 }}>
+                  <Tag label={grade.label} color={grade.color} />
+                </View>
+                <Text style={{ fontSize: 11, color: C.t3, marginTop: 10 }}>Tu salud financiera este mes</Text>
+              </View>
+              <View style={{ flexDirection: "row", backgroundColor: grade.color + "12", borderTopWidth: 1, borderTopColor: grade.color + "25" }}>
+                {[
+                  [streak + " días", "Racha", C.orange],
+                  [savePct + "%",    "Ahorro", C.mint],
+                  [expenses.length + "", "Registros", C.sky],
+                ].map(([v, l, c], i) => (
+                  <View key={l} style={{ flex: 1, paddingVertical: 13, alignItems: "center", borderRightWidth: i < 2 ? 1 : 0, borderRightColor: grade.color + "20" }}>
+                    <Text style={{ fontSize: 17, fontWeight: "800", color: c }}>{v}</Text>
+                    <Text style={{ fontSize: 10, color: C.t3, marginTop: 3, letterSpacing: 0.5 }}>{l}</Text>
                   </View>
-                  <Bar pct={val} color={color} />
+                ))}
+              </View>
+            </View>
+
+            {/* Score Breakdown */}
+            <Card style={{ marginBottom: 14 }}>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1, marginBottom: 16 }}>Desglose del Score</Text>
+              {[
+                ["💰", "Tasa de ahorro",   s.ahorro,      C.mint],
+                ["📊", "Control",          s.presupuesto, C.sky],
+                ["📝", "Registro",         s.consistencia,C.violet],
+                ["💳", "Manejo de deudas", s.deuda,       C.gold],
+              ].map(([ic, label, val, color], idx) => (
+                <View key={label} style={{ marginBottom: idx < 3 ? 14 : 0 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 7 }}>
+                    <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: color + "18", borderWidth: 1, borderColor: color + "30", alignItems: "center", justifyContent: "center" }}>
+                      <Text style={{ fontSize: 16 }}>{ic}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
+                        <Text style={{ fontSize: 13, color: C.t2 }}>{label}</Text>
+                        <Text style={{ fontSize: 13, fontWeight: "800", color }}>{Math.round(val)}pts</Text>
+                      </View>
+                      <Bar pct={val} color={color} h={6} showGlow />
+                    </View>
+                  </View>
                 </View>
               ))}
             </Card>
+
+            {/* Logros */}
             <Card>
-              <Text style={{ fontSize: 13, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Logros 🏅</Text>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1, marginBottom: 16 }}>Logros 🏅</Text>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
                 {[
-                  ["🔥", "Racha activa",     streak + " dias registrando", streak >= 3],
-                  ["💯", "Sin exceder",       "Presupuesto OK",             !overBudget && expenses.length > 0],
-                  ["🎯", "Meta activa",       "Ahorro en curso",            hasActiveGoal],
-                  ["🦸", "Super ahorrador",  "30%+ ahorro",                isSuperSaver],
-                  ["🧘", "Sin deudas",       "Lista de deudas limpia",     noNewDebts],
-                  ["📆", "Mes perfecto",     "20+ registros, meta alcanzada", perfectMonth],
-                ].map(([ic, label, desc, done]) => (
-                  <View key={label} style={{ width: "47%", backgroundColor: done ? C.mintBg : C.card2, borderRadius: 14, borderWidth: 1, borderColor: done ? C.mint + "40" : C.border, padding: 13, opacity: done ? 1 : 0.35 }}>
-                    <Text style={{ fontSize: 22, marginBottom: 6 }}>{ic}</Text>
-                    <Text style={{ fontSize: 12, fontWeight: "700", color: done ? C.mint : C.t3 }}>{label}</Text>
-                    <Text style={{ fontSize: 10, color: C.t3, marginTop: 2 }}>{desc}</Text>
+                  ["🔥", "Racha activa",    streak + " días registrando",    streak >= 3,   C.orange],
+                  ["💯", "Sin exceder",      "Presupuesto OK",                !overBudget && expenses.length > 0, C.mint],
+                  ["🎯", "Meta activa",      "Ahorro en curso",               hasActiveGoal, C.sky],
+                  ["🦸", "Super ahorrador", "30%+ ahorro",                   isSuperSaver,  C.gold],
+                  ["🧘", "Sin deudas",      "Lista de deudas limpia",        noNewDebts,    C.green],
+                  ["📆", "Mes perfecto",    "20+ registros, meta alcanzada", perfectMonth,  C.violet],
+                ].map(([ic, label, desc, done, col]) => (
+                  <View key={label} style={{ width: "47%", backgroundColor: done ? col + "14" : C.card2, borderRadius: 16, borderWidth: 1, borderColor: done ? col + "45" : C.border, padding: 14, opacity: done ? 1 : 0.3 }}>
+                    <Text style={{ fontSize: 24, marginBottom: 8 }}>{ic}</Text>
+                    <Text style={{ fontSize: 12, fontWeight: "800", color: done ? col : C.t3, marginBottom: 2 }}>{label}</Text>
+                    <Text style={{ fontSize: 10, color: C.t3, lineHeight: 14 }}>{desc}</Text>
+                    {done && <View style={{ position: "absolute", top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: col }} />}
                   </View>
                 ))}
               </View>
@@ -1181,16 +1764,19 @@ function NavBar({ tab, setTab }) {
     { id: "chat",        icon: "◉",  label: "IA"       },
     { id: "deudas",      icon: "💳", label: "Deudas"   },
     { id: "metas",       icon: "◎",  label: "Metas"    },
-    { id: "herramientas",icon: "⋯",  label: "Mas"      },
+    { id: "herramientas",icon: "⋯",  label: "Más"      },
   ];
   return (
-    <View style={[styles.navBar, { paddingBottom: insets.bottom + 8 }]}>
+    <View style={[styles.navBar, { paddingBottom: insets.bottom + 8, borderTopColor: C.border2 }]}>
       {items.map(item => {
         const active = tab === item.id;
         return (
           <TouchableOpacity key={item.id} onPress={() => setTab(item.id)} style={styles.navBtn} activeOpacity={0.7}>
-            {active && <View style={{ position: "absolute", top: 0, width: 32, height: 2, backgroundColor: C.mint, borderRadius: 99 }} />}
-            <Text style={{ fontSize: item.icon.length > 2 ? 14 : 22, color: active ? C.mint : C.t4, marginTop: 6 }}>{item.icon}</Text>
+            {active && <View style={{ position: "absolute", top: 0, width: 36, height: 2.5, backgroundColor: C.mint, borderRadius: 99 }} />}
+            <View style={{ marginTop: 6, width: 36, height: 28, alignItems: "center", justifyContent: "center",
+              backgroundColor: active ? C.mintBg2 : "transparent", borderRadius: 10 }}>
+              <Text style={{ fontSize: item.icon.length > 2 ? 14 : 20, color: active ? C.mint : C.t4 }}>{item.icon}</Text>
+            </View>
             <Text style={{ fontSize: 9, fontWeight: "700", color: active ? C.mint : C.t4, marginTop: 2, letterSpacing: 0.5 }}>{item.label}</Text>
           </TouchableOpacity>
         );
@@ -1296,14 +1882,14 @@ export default function App() {
 // ESTILOS
 // ─────────────────────────────────────────────
 const styles = StyleSheet.create({
-  card:    { backgroundColor: C.card, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 18, marginHorizontal: 16, marginBottom: 12 },
-  btn:     { borderRadius: 13, padding: 15, alignItems: "center" },
+  card:    { backgroundColor: C.card, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 18, marginHorizontal: 16, marginBottom: 12 },
+  btn:     { borderRadius: 14, padding: 15, alignItems: "center", flexDirection: "row", justifyContent: "center" },
   btnText: { fontSize: 15, fontWeight: "700" },
-  input:   { backgroundColor: C.card, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 14, color: C.t1, fontSize: 14, marginBottom: 10 },
+  input:   { backgroundColor: C.card2, borderWidth: 1, borderColor: C.border2, borderRadius: 13, padding: 14, color: C.t1, fontSize: 14, marginBottom: 10 },
   obWrap:  { flex: 1, backgroundColor: C.bg, padding: 24, paddingTop: 52 },
-  obH:     { fontSize: 26, fontWeight: "800", color: C.t1, marginBottom: 6, letterSpacing: -0.5 },
+  obH:     { fontSize: 28, fontWeight: "900", color: C.t1, marginBottom: 6, letterSpacing: -0.8 },
   obSub:   { fontSize: 13, color: C.t2, marginBottom: 24, lineHeight: 20 },
-  lbl:     { fontSize: 10, color: C.t3, letterSpacing: 1.5, fontWeight: "700", marginBottom: 6 },
+  lbl:     { fontSize: 10, color: C.t3, letterSpacing: 2, fontWeight: "700", marginBottom: 6, textTransform: "uppercase" },
   navBar:  { flexDirection: "row", backgroundColor: C.card, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 4 },
   navBtn:  { flex: 1, alignItems: "center", paddingVertical: 4, position: "relative" },
 });
