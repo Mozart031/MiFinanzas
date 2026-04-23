@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, ActivityIndicator, KeyboardAvoidingView,
-  Platform, StatusBar, Alert, Dimensions,
+  Platform, StatusBar, Alert, Dimensions, Animated,
+  Modal, Pressable,
 } from "react-native";
 import { SafeAreaView, SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -135,6 +136,53 @@ function payoffMonths(balance, rate, payment) {
   if (payment <= r * balance) return Infinity;
   if (r === 0) return Math.ceil(balance / payment);
   return Math.ceil(Math.log(payment / (payment - r * balance)) / Math.log(1 + r));
+}
+
+// ─────────────────────────────────────────────
+// UTILIDAD: calcular racha real de dias
+// ─────────────────────────────────────────────
+function calcStreak(streakDays) {
+  if (!streakDays || streakDays.length === 0) return 0;
+  const sorted = [...new Set(streakDays)].sort().reverse();
+  let streak = 0;
+  let check = new Date();
+  check.setHours(0, 0, 0, 0);
+  for (let i = 0; i < sorted.length; i++) {
+    const d = new Date(sorted[i]);
+    d.setHours(0, 0, 0, 0);
+    const diff = Math.round((check - d) / 86400000);
+    if (diff === 0 || diff === streak) { streak++; check = d; }
+    else if (diff > 1) break;
+  }
+  return streak;
+}
+
+// Días de runway: cuántos días sobrevives sin ingresos
+function calcRunway(balance, expenses) {
+  if (expenses.length === 0) return null;
+  const days = Math.max(DAY, 1);
+  const dailyBurn = expenses.reduce((a, e) => a + e.amount, 0) / days;
+  if (dailyBurn <= 0) return null;
+  return Math.floor(balance / dailyBurn);
+}
+
+// Horas de trabajo que cuesta algo (filtro de arrepentimiento)
+function lifeHours(amount, monthlyIncome) {
+  if (!monthlyIncome || monthlyIncome <= 0) return null;
+  const hourlyRate = monthlyIncome / (22 * 8); // 22 días laborales × 8h
+  return Math.round(amount / hourlyRate);
+}
+
+// Modo supervivencia: % gastado vs ingresos antes de quincena
+function survivalMode(expenses, income, day) {
+  const totalInc = income.reduce((a, i) => a + i.amount, 0);
+  const totalExp = expenses.reduce((a, e) => a + e.amount, 0);
+  if (totalInc <= 0) return false;
+  if (day <= 15) {
+    const halfInc = totalInc * 0.5;
+    return totalExp >= halfInc * 0.8;
+  }
+  return totalExp >= totalInc * 0.9;
 }
 
 // ─────────────────────────────────────────────
@@ -275,6 +323,305 @@ function StatBox({ label, value, color, sub, style }) {
       <Text style={{ fontSize: 10, color: C.t3, marginTop: 3, letterSpacing: 0.5 }}>{label}</Text>
       {sub ? <Text style={{ fontSize: 10, color: color || C.t2, marginTop: 1 }}>{sub}</Text> : null}
     </View>
+  );
+}
+
+// ─────────────────────────────────────────────
+// ANIMACIÓN — wrapper de entrada
+// ─────────────────────────────────────────────
+function FadeIn({ children, delay = 0, style }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(18)).current;
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity,     { toValue: 1, duration: 380, delay, useNativeDriver: true }),
+      Animated.timing(translateY,  { toValue: 0, duration: 380, delay, useNativeDriver: true }),
+    ]).start();
+  }, []);
+  return (
+    <Animated.View style={[{ opacity, transform: [{ translateY }] }, style]}>
+      {children}
+    </Animated.View>
+  );
+}
+
+// ─────────────────────────────────────────────
+// FAB — Modal de registro rápido
+// ─────────────────────────────────────────────
+function FABModal({ visible, onClose, onSave, cur }) {
+  const [desc,   setDesc]   = useState("");
+  const [amount, setAmount] = useState("");
+  const [cat,    setCat]    = useState("Otro");
+  const slideAnim = useRef(new Animated.Value(400)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.spring(slideAnim, { toValue: 0, tension: 65, friction: 11, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(slideAnim, { toValue: 400, duration: 220, useNativeDriver: true }).start();
+    }
+  }, [visible]);
+
+  const save = () => {
+    if (!amount || isNaN(+amount)) return;
+    const today = new Date().toISOString().split("T")[0];
+    onSave({ id: Date.now(), desc: desc.trim() || cat, amount: +amount, cat, date: today });
+    setDesc(""); setAmount(""); setCat("Otro");
+    onClose();
+  };
+
+  if (!visible) return null;
+  return (
+    <Modal transparent animationType="none" visible={visible} onRequestClose={onClose}>
+      <Pressable style={{ flex: 1, backgroundColor: "#000000BB", justifyContent: "flex-end" }} onPress={onClose}>
+        <Animated.View
+          style={{ transform: [{ translateY: slideAnim }] }}
+          onStartShouldSetResponder={() => true}
+        >
+          <View style={{ backgroundColor: C.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, borderColor: C.border2, padding: 20, paddingBottom: 36 }}>
+            {/* Handle */}
+            <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: C.border2, alignSelf: "center", marginBottom: 18 }} />
+            <Text style={{ fontSize: 18, fontWeight: "900", color: C.t1, marginBottom: 16, letterSpacing: -0.5 }}>⚡ Registro rápido</Text>
+
+            {/* Categoría chips */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {Object.entries(CATS).map(([key, val]) => (
+                  <TouchableOpacity key={key} onPress={() => setCat(key)}
+                    style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1.5,
+                      borderColor: cat === key ? val.color : C.border,
+                      backgroundColor: cat === key ? val.color + "22" : C.card2 }}>
+                    <Text style={{ fontSize: 12, fontWeight: "700", color: cat === key ? val.color : C.t3 }}>
+                      {val.icon} {key}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+
+            <Input value={desc} onChange={setDesc} placeholder={`Descripción (ej: Almuerzo, Uber...)`} />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Input value={amount} onChange={setAmount} placeholder={`Monto en ${cur}`} numeric />
+              </View>
+              <TouchableOpacity onPress={save} style={{ width: 54, height: 54, backgroundColor: C.mint, borderRadius: 16,
+                alignItems: "center", justifyContent: "center",
+                shadowColor: C.mint, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 12 }}>
+                <Text style={{ fontSize: 24, color: "#000", fontWeight: "900" }}>✓</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Animated.View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// ─────────────────────────────────────────────
+// FAB BUTTON — botón flotante persistente
+// ─────────────────────────────────────────────
+function FAB({ onPress }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const pulse = () => {
+    Animated.sequence([
+      Animated.timing(scale, { toValue: 0.9, duration: 80, useNativeDriver: true }),
+      Animated.spring(scale, { toValue: 1, tension: 120, friction: 6, useNativeDriver: true }),
+    ]).start();
+    onPress();
+  };
+  return (
+    <Animated.View style={{ position: "absolute", bottom: 88, right: 20, transform: [{ scale }],
+      shadowColor: C.mint, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}>
+      <TouchableOpacity onPress={pulse} activeOpacity={1}
+        style={{ width: 58, height: 58, borderRadius: 18, backgroundColor: C.mint, alignItems: "center", justifyContent: "center",
+          borderWidth: 1.5, borderColor: "#00FFD0" }}>
+        <Text style={{ fontSize: 28, color: "#000", fontWeight: "900", lineHeight: 32 }}>+</Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+// ─────────────────────────────────────────────
+// HISTORIAL MODAL — gastos completos con filtros y eliminar
+// ─────────────────────────────────────────────
+function HistorialModal({ visible, onClose, expenses, onDelete, cur }) {
+  const [filterCat, setFilterCat] = useState("Todos");
+  const slideAnim = useRef(new Animated.Value(600)).current;
+
+  useEffect(() => {
+    if (visible) Animated.spring(slideAnim, { toValue: 0, tension: 60, friction: 12, useNativeDriver: true }).start();
+    else Animated.timing(slideAnim, { toValue: 600, duration: 240, useNativeDriver: true }).start();
+  }, [visible]);
+
+  if (!visible) return null;
+
+  const cats = ["Todos", ...Object.keys(CATS)];
+  const filtered = filterCat === "Todos" ? expenses : expenses.filter(e => e.cat === filterCat);
+  const total = filtered.reduce((a, e) => a + e.amount, 0);
+
+  return (
+    <Modal transparent animationType="none" visible={visible} onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: "#000000CC" }}>
+        <Animated.View style={{ flex: 1, marginTop: 60, backgroundColor: C.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28,
+          borderWidth: 1, borderColor: C.border2, transform: [{ translateY: slideAnim }] }}>
+          {/* Header */}
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 20, borderBottomWidth: 1, borderBottomColor: C.border }}>
+            <View>
+              <Text style={{ fontSize: 20, fontWeight: "900", color: C.t1, letterSpacing: -0.5 }}>Historial completo</Text>
+              <Text style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{filtered.length} movimientos · {money(total, cur)}</Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: C.card2, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ color: C.t2, fontSize: 18, fontWeight: "700" }}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Filtros */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, paddingVertical: 12, maxHeight: 52 }}>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {cats.map(c => {
+                const info = CATS[c];
+                const active = filterCat === c;
+                const col = info?.color || C.mint;
+                return (
+                  <TouchableOpacity key={c} onPress={() => setFilterCat(c)}
+                    style={{ paddingHorizontal: 13, paddingVertical: 6, borderRadius: 10, borderWidth: 1.5,
+                      borderColor: active ? col : C.border, backgroundColor: active ? col + "22" : C.card2 }}>
+                    <Text style={{ fontSize: 11, fontWeight: "700", color: active ? col : C.t3 }}>
+                      {info ? info.icon + " " : ""}{c}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </ScrollView>
+
+          {/* Lista */}
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+            {filtered.length === 0 ? (
+              <View style={{ alignItems: "center", paddingVertical: 48 }}>
+                <Text style={{ fontSize: 40, marginBottom: 12 }}>🔍</Text>
+                <Text style={{ fontSize: 15, color: C.t3 }}>Sin registros en esta categoría</Text>
+              </View>
+            ) : (
+              filtered.map((e, i) => {
+                const info = CATS[e.cat] || CATS["Otro"];
+                return (
+                  <View key={e.id}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 }}>
+                      <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: info.color + "18",
+                        borderWidth: 1, borderColor: info.color + "30", alignItems: "center", justifyContent: "center" }}>
+                        <Text style={{ fontSize: 20 }}>{info.icon}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 13, fontWeight: "700", color: C.t1 }} numberOfLines={1}>{e.desc}</Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+                          <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: info.color }} />
+                          <Text style={{ fontSize: 10, color: C.t3 }}>{e.cat} · {e.date}</Text>
+                        </View>
+                      </View>
+                      <Text style={{ fontSize: 14, fontWeight: "800", color: C.rose }}>-{money(e.amount, cur)}</Text>
+                      <TouchableOpacity onPress={() => Alert.alert("Eliminar gasto", `¿Eliminar "${e.desc}"?`, [
+                        { text: "Cancelar", style: "cancel" },
+                        { text: "Eliminar", style: "destructive", onPress: () => onDelete(e.id) },
+                      ])} style={{ padding: 8 }}>
+                        <Text style={{ color: C.t4, fontSize: 18 }}>×</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {i < filtered.length - 1 && <View style={{ height: 1, backgroundColor: C.border, marginLeft: 56 }} />}
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─────────────────────────────────────────────
+// INGRESOS MODAL — gestión de ingresos
+// ─────────────────────────────────────────────
+function IngresosModal({ visible, onClose, income, onSave, cur }) {
+  const [list,    setList]    = useState(income);
+  const [adding,  setAdding]  = useState(false);
+  const [form,    setForm]    = useState({ source: "", amount: "", type: "fijo" });
+  const slideAnim = useRef(new Animated.Value(600)).current;
+
+  useEffect(() => { setList(income); }, [income]);
+  useEffect(() => {
+    if (visible) Animated.spring(slideAnim, { toValue: 0, tension: 60, friction: 12, useNativeDriver: true }).start();
+    else Animated.timing(slideAnim, { toValue: 600, duration: 240, useNativeDriver: true }).start();
+  }, [visible]);
+
+  if (!visible) return null;
+  const total = list.reduce((a, i) => a + i.amount, 0);
+
+  const save = () => {
+    if (!form.source || !form.amount) return;
+    const updated = [...list, { id: Date.now(), source: form.source, amount: +form.amount,
+      date: new Date().toISOString().split("T")[0], type: form.type }];
+    setList(updated); onSave(updated);
+    setForm({ source: "", amount: "", type: "fijo" }); setAdding(false);
+  };
+
+  return (
+    <Modal transparent animationType="none" visible={visible} onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: "#000000CC" }}>
+        <Animated.View style={{ flex: 1, marginTop: 60, backgroundColor: C.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28,
+          borderWidth: 1, borderColor: C.border2, transform: [{ translateY: slideAnim }] }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 20, borderBottomWidth: 1, borderBottomColor: C.border }}>
+            <View>
+              <Text style={{ fontSize: 20, fontWeight: "900", color: C.t1 }}>Mis Ingresos 💼</Text>
+              <Text style={{ fontSize: 11, color: C.mint, marginTop: 2, fontWeight: "700" }}>Total: {money(total, cur)}/mes</Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: C.card2, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ color: C.t2, fontSize: 18, fontWeight: "700" }}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+            {list.map((inc, i) => (
+              <View key={inc.id} style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12,
+                backgroundColor: C.card2, borderRadius: 16, borderWidth: 1, borderColor: C.border2, padding: 14 }}>
+                <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: C.mintBg2, alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ fontSize: 20 }}>{inc.type === "fijo" ? "💼" : "⚡"}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>{inc.source}</Text>
+                  <Tag label={inc.type === "fijo" ? "Fijo" : "Variable"} color={inc.type === "fijo" ? C.mint : C.gold} size="sm" />
+                </View>
+                <Text style={{ fontSize: 16, fontWeight: "800", color: C.mint }}>{money(inc.amount, cur)}</Text>
+                <TouchableOpacity onPress={() => { const u = list.filter(x => x.id !== inc.id); setList(u); onSave(u); }}>
+                  <Text style={{ color: C.t4, fontSize: 20 }}>×</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+            {adding ? (
+              <View style={{ backgroundColor: C.card, borderRadius: 18, borderWidth: 1, borderColor: C.border2, padding: 16, marginTop: 4 }}>
+                <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Nueva fuente de ingreso</Text>
+                <Input value={form.source} onChange={v => setForm({ ...form, source: v })} placeholder="Nombre (ej: Salario, Freelance...)" />
+                <Input value={form.amount} onChange={v => setForm({ ...form, amount: v })} placeholder={`Monto mensual (${cur})`} numeric />
+                <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
+                  {[["fijo", "💼 Fijo"], ["variable", "⚡ Variable"]].map(([t, l]) => (
+                    <TouchableOpacity key={t} onPress={() => setForm({ ...form, type: t })}
+                      style={{ flex: 1, paddingVertical: 10, borderRadius: 11, borderWidth: 1.5, alignItems: "center",
+                        borderColor: form.type === t ? C.mint : C.border, backgroundColor: form.type === t ? C.mintBg : C.card2 }}>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: form.type === t ? C.mint : C.t3 }}>{l}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  <Btn label="Cancelar" onPress={() => setAdding(false)} ghost style={{ flex: 1 }} />
+                  <Btn label="Guardar" onPress={save} style={{ flex: 2 }} />
+                </View>
+              </View>
+            ) : (
+              <Btn label="+ Agregar ingreso" onPress={() => setAdding(true)} ghost style={{ marginTop: 4 }} />
+            )}
+          </ScrollView>
+        </Animated.View>
+      </View>
+    </Modal>
   );
 }
 
@@ -625,7 +972,7 @@ function StreakBanner({ streakDays = [], onPress }) {
 // ─────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────
-function HomeScreen({ state, openSettings }) {
+function HomeScreen({ state, openSettings, onAddExpense, onUpdateIncome, onDeleteExpense }) {
   const { expenses, income, budgets, user, streakDays = [] } = state;
   const cur = user.currency;
   const totalExp = expenses.reduce((a, e) => a + e.amount, 0);
@@ -640,179 +987,288 @@ function HomeScreen({ state, openSettings }) {
     .map(([cat, lim]) => ({ cat, pct: ((ct[cat] || 0) / lim) * 100 }))
     .filter(a => a.pct >= 70)
     .sort((a, b) => b.pct - a.pct);
+  const runway   = calcRunway(balance, expenses);
+  const isSurvival = survivalMode(expenses, income, DAY);
+
+  const [showFAB,       setShowFAB]       = useState(false);
+  const [showHistorial, setShowHistorial] = useState(false);
+  const [showIngresos,  setShowIngresos]  = useState(false);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={["top"]}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
+    <View style={{ flex: 1, backgroundColor: isSurvival ? "#0A0006" : C.bg }}>
+      <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 130 }}>
 
-        {/* Header */}
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 18, paddingTop: 14, paddingBottom: 10 }}>
-          <View>
-            <Text style={{ fontSize: 12, color: C.t3, letterSpacing: 0.5 }}>Hola, <Text style={{ color: C.t2, fontWeight: "600" }}>{user.name}</Text> 👋</Text>
-            <Text style={{ fontSize: 24, fontWeight: "900", color: C.t1, letterSpacing: -1, marginTop: 1 }}>Mi<Text style={{ color: C.mint }}>Finanzas</Text></Text>
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View style={{ backgroundColor: grade.color + "18", borderRadius: 12, borderWidth: 1, borderColor: grade.color + "40", paddingHorizontal: 11, paddingVertical: 7, flexDirection: "row", alignItems: "center", gap: 5 }}>
-              <Text style={{ fontSize: 14 }}>{grade.emoji}</Text>
-              <Text style={{ fontSize: 14, fontWeight: "800", color: grade.color }}>{sc}pts</Text>
-            </View>
-            <TouchableOpacity onPress={openSettings} style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border2, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ fontSize: 18 }}>⚙️</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Hero Balance Card */}
-        <View style={{ marginHorizontal: 16, marginBottom: 14, borderRadius: 24, overflow: "hidden", borderWidth: 1, borderColor: C.mint + "40",
-          shadowColor: C.mint, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 8 }}>
-          <View style={{ backgroundColor: "#00140F", padding: 20, paddingBottom: 0 }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+          {/* Header */}
+          <FadeIn delay={0}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 18, paddingTop: 14, paddingBottom: 10 }}>
               <View>
-                <Text style={{ fontSize: 10, color: C.mint, letterSpacing: 3, fontWeight: "700", marginBottom: 6 }}>BALANCE DISPONIBLE</Text>
-                <Text style={{ fontSize: 42, fontWeight: "900", color: C.mint, letterSpacing: -2, lineHeight: 48 }}>{money(balance, cur)}</Text>
+                <Text style={{ fontSize: 12, color: C.t3, letterSpacing: 0.5 }}>Hola, <Text style={{ color: C.t2, fontWeight: "600" }}>{user.name}</Text> 👋</Text>
+                <Text style={{ fontSize: 24, fontWeight: "900", color: C.t1, letterSpacing: -1, marginTop: 1 }}>Mi<Text style={{ color: isSurvival ? C.rose : C.mint }}>Finanzas</Text></Text>
               </View>
-              <View style={{ backgroundColor: C.mintBg2, borderRadius: 14, borderWidth: 1, borderColor: C.mint + "30", padding: 10 }}>
-                <Text style={{ fontSize: 24 }}>💰</Text>
-              </View>
-            </View>
-            {/* Savings progress bar */}
-            <View style={{ marginTop: 14, marginBottom: 0 }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
-                <Text style={{ fontSize: 11, color: C.t3 }}>Tasa de ahorro</Text>
-                <Text style={{ fontSize: 11, fontWeight: "700", color: savePct >= 20 ? C.mint : savePct >= 10 ? C.gold : C.rose }}>{savePct}%</Text>
-              </View>
-              <Bar pct={savePct} color={savePct >= 20 ? C.mint : savePct >= 10 ? C.gold : C.rose} h={6} showGlow />
-            </View>
-          </View>
-          {/* Stats row */}
-          <View style={{ backgroundColor: "#001A14", flexDirection: "row", borderTopWidth: 1, borderTopColor: C.mint + "20" }}>
-            {[
-              [money(totalInc, cur), "Ingresos", C.mint],
-              [money(totalExp, cur), "Gastos",   C.rose],
-              [savePct + "%",        "Ahorro",   savePct >= 20 ? C.gold : C.t2],
-            ].map(([v, l, c], i) => (
-              <View key={l} style={{ flex: 1, paddingVertical: 14, alignItems: "center", borderRightWidth: i < 2 ? 1 : 0, borderRightColor: C.mint + "20" }}>
-                <Text style={{ fontSize: 15, fontWeight: "800", color: c, letterSpacing: -0.3 }}>{v}</Text>
-                <Text style={{ fontSize: 10, color: C.t3, marginTop: 3, letterSpacing: 0.5 }}>{l}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* Streak Banner — Duolingo style */}
-        <StreakBanner streakDays={streakDays} onPress={openSettings} />
-
-        {/* Alertas de presupuesto */}
-        {alerts.length > 0 && (
-          <Card danger={alerts.some(a => a.pct > 100)} style={{ marginBottom: 14, borderColor: C.gold + "45" }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 }}>
-              <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: C.goldBg2, alignItems: "center", justifyContent: "center" }}>
-                <Text style={{ fontSize: 16 }}>⚡</Text>
-              </View>
-              <Text style={{ fontSize: 14, fontWeight: "700", color: C.gold }}>Alertas de Presupuesto</Text>
-            </View>
-            {alerts.map(({ cat, pct }, idx) => (
-              <View key={cat}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                  <CatIcon cat={cat} size={36} />
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
-                      <Text style={{ fontSize: 13, fontWeight: "600", color: C.t1 }}>{cat}</Text>
-                      <Tag label={Math.round(pct) + "%"} color={pct > 100 ? C.rose : C.gold} />
-                    </View>
-                    <Bar pct={pct} color={CATS[cat]?.color} h={6} showGlow />
-                  </View>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={{ backgroundColor: grade.color + "18", borderRadius: 12, borderWidth: 1, borderColor: grade.color + "40", paddingHorizontal: 11, paddingVertical: 7, flexDirection: "row", alignItems: "center", gap: 5 }}>
+                  <Text style={{ fontSize: 14 }}>{grade.emoji}</Text>
+                  <Text style={{ fontSize: 14, fontWeight: "800", color: grade.color }}>{sc}pts</Text>
                 </View>
-                {idx < alerts.length - 1 && <Divider />}
+                <TouchableOpacity onPress={openSettings} style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border2, alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ fontSize: 18 }}>⚙️</Text>
+                </TouchableOpacity>
               </View>
-            ))}
-          </Card>
-        )}
-
-        {/* Gastos del mes — barras horizontales con color por categoría */}
-        {Object.keys(ct).length > 0 && (
-          <Card style={{ marginBottom: 14 }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Gastos del mes</Text>
-              <Tag label={money(totalExp, cur)} color={C.rose} />
             </View>
-            {Object.entries(ct).sort((a, b) => b[1] - a[1]).map(([cat, amt], idx) => {
-              const info = CATS[cat] || CATS["Otro"];
-              const pct = totalExp > 0 ? (amt / totalExp) * 100 : 0;
-              return (
-                <View key={cat} style={{ marginBottom: idx < Object.keys(ct).length - 1 ? 14 : 0 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 7 }}>
-                    <CatIcon cat={cat} size={38} />
-                    <View style={{ flex: 1 }}>
-                      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
-                        <Text style={{ fontSize: 13, fontWeight: "600", color: C.t2 }}>{cat}</Text>
-                        <Text style={{ fontSize: 13, fontWeight: "800", color: C.t1 }}>{money(amt, cur)}</Text>
-                      </View>
-                      <Bar pct={(amt / maxCat) * 100} color={info.color} h={5} showGlow />
-                    </View>
-                    <Text style={{ fontSize: 11, color: C.t3, width: 34, textAlign: "right" }}>{Math.round(pct)}%</Text>
-                  </View>
-                </View>
-              );
-            })}
-          </Card>
-        )}
+          </FadeIn>
 
-        {/* Últimos movimientos */}
-        <Card style={{ marginBottom: 14 }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Últimos movimientos</Text>
-            {expenses.length > 0 && <Tag label={expenses.length + " registros"} color={C.t3} />}
-          </View>
-          {expenses.length === 0 ? (
-            <View style={{ alignItems: "center", paddingVertical: 28 }}>
-              <Text style={{ fontSize: 36, marginBottom: 10 }}>📝</Text>
-              <Text style={{ fontSize: 14, fontWeight: "700", color: C.t2, marginBottom: 4 }}>Sin movimientos aún</Text>
-              <Text style={{ fontSize: 12, color: C.t3, textAlign: "center", lineHeight: 18 }}>Usa el Asistente IA para{"\n"}registrar tus gastos</Text>
-            </View>
-          ) : (
-            expenses.slice(0, 6).map((e, i) => {
-              const info = CATS[e.cat] || CATS["Otro"];
-              return (
-                <View key={e.id}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                    <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: info.color + "18", borderWidth: 1, borderColor: info.color + "30", alignItems: "center", justifyContent: "center" }}>
-                      <Text style={{ fontSize: 20 }}>{info.icon}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: "700", color: C.t1 }} numberOfLines={1}>{e.desc}</Text>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
-                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: info.color }} />
-                        <Text style={{ fontSize: 10, color: C.t3 }}>{e.cat} · {e.date}</Text>
-                      </View>
-                    </View>
-                    <View style={{ alignItems: "flex-end" }}>
-                      <Text style={{ fontSize: 15, fontWeight: "800", color: C.rose }}>-{money(e.amount, cur)}</Text>
-                    </View>
-                  </View>
-                  {i < Math.min(expenses.length, 6) - 1 && <View style={{ height: 1, backgroundColor: C.border, marginVertical: 11, marginLeft: 56 }} />}
+          {/* MODO SUPERVIVENCIA — banner urgente */}
+          {isSurvival && (
+            <FadeIn delay={50}>
+              <View style={{ marginHorizontal: 16, marginBottom: 12, borderRadius: 18, backgroundColor: C.roseBg2,
+                borderWidth: 1.5, borderColor: C.rose + "60", padding: 14, flexDirection: "row", alignItems: "center", gap: 12 }}>
+                <Text style={{ fontSize: 28 }}>🚨</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "900", color: C.rose, letterSpacing: -0.3 }}>MODO SUPERVIVENCIA</Text>
+                  <Text style={{ fontSize: 11, color: C.t2, marginTop: 2, lineHeight: 16 }}>Has gastado el 80%+ antes de terminar el período. Prioriza solo necesidades.</Text>
                 </View>
-              );
-            })
+              </View>
+            </FadeIn>
           )}
-        </Card>
 
-      </ScrollView>
-    </SafeAreaView>
+          {/* Hero Balance */}
+          <FadeIn delay={80}>
+            <View style={{ marginHorizontal: 16, marginBottom: 14, borderRadius: 24, overflow: "hidden", borderWidth: 1,
+              borderColor: isSurvival ? C.rose + "50" : C.mint + "40",
+              shadowColor: isSurvival ? C.rose : C.mint,
+              shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.18, shadowRadius: 20, elevation: 8 }}>
+              <View style={{ backgroundColor: isSurvival ? "#140008" : "#00140F", padding: 20, paddingBottom: 0 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <View>
+                    <Text style={{ fontSize: 10, color: isSurvival ? C.rose : C.mint, letterSpacing: 3, fontWeight: "700", marginBottom: 6 }}>BALANCE DISPONIBLE</Text>
+                    <Text style={{ fontSize: 42, fontWeight: "900", color: isSurvival ? C.rose : C.mint, letterSpacing: -2, lineHeight: 48 }}>{money(balance, cur)}</Text>
+                  </View>
+                  {/* Runway badge */}
+                  {runway !== null && (
+                    <TouchableOpacity style={{ backgroundColor: (runway < 15 ? C.rose : runway < 30 ? C.gold : C.mint) + "20",
+                      borderRadius: 14, borderWidth: 1, borderColor: (runway < 15 ? C.rose : runway < 30 ? C.gold : C.mint) + "45",
+                      padding: 10, alignItems: "center" }}>
+                      <Text style={{ fontSize: 20, fontWeight: "900", color: runway < 15 ? C.rose : runway < 30 ? C.gold : C.mint }}>{runway}</Text>
+                      <Text style={{ fontSize: 8, color: C.t3, letterSpacing: 1, fontWeight: "700" }}>DÍAS</Text>
+                      <Text style={{ fontSize: 8, color: C.t3, letterSpacing: 0.5 }}>RUNWAY</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <View style={{ marginTop: 14, marginBottom: 0 }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
+                    <Text style={{ fontSize: 11, color: C.t3 }}>Tasa de ahorro</Text>
+                    <Text style={{ fontSize: 11, fontWeight: "700", color: savePct >= 20 ? C.mint : savePct >= 10 ? C.gold : C.rose }}>{savePct}%</Text>
+                  </View>
+                  <Bar pct={savePct} color={savePct >= 20 ? C.mint : savePct >= 10 ? C.gold : C.rose} h={6} showGlow />
+                </View>
+              </View>
+              {/* Stats row — ingresos clickeable */}
+              <View style={{ backgroundColor: isSurvival ? "#1A0010" : "#001A14", flexDirection: "row", borderTopWidth: 1, borderTopColor: (isSurvival ? C.rose : C.mint) + "20" }}>
+                <TouchableOpacity onPress={() => setShowIngresos(true)} style={{ flex: 1, paddingVertical: 14, alignItems: "center", borderRightWidth: 1, borderRightColor: (isSurvival ? C.rose : C.mint) + "20" }}>
+                  <Text style={{ fontSize: 15, fontWeight: "800", color: C.mint }}>{money(totalInc, cur)}</Text>
+                  <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Ingresos ✏️</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowHistorial(true)} style={{ flex: 1, paddingVertical: 14, alignItems: "center", borderRightWidth: 1, borderRightColor: (isSurvival ? C.rose : C.mint) + "20" }}>
+                  <Text style={{ fontSize: 15, fontWeight: "800", color: C.rose }}>{money(totalExp, cur)}</Text>
+                  <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Gastos 📋</Text>
+                </TouchableOpacity>
+                <View style={{ flex: 1, paddingVertical: 14, alignItems: "center" }}>
+                  <Text style={{ fontSize: 15, fontWeight: "800", color: savePct >= 20 ? C.gold : C.t2 }}>{savePct}%</Text>
+                  <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Ahorro</Text>
+                </View>
+              </View>
+            </View>
+          </FadeIn>
+
+          {/* Streak Banner */}
+          <FadeIn delay={120}>
+            <StreakBanner streakDays={streakDays} onPress={openSettings} />
+          </FadeIn>
+
+          {/* Alertas */}
+          {alerts.length > 0 && (
+            <FadeIn delay={160}>
+              <Card danger={alerts.some(a => a.pct > 100)} style={{ marginBottom: 14, borderColor: C.gold + "45" }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                  <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: C.goldBg2, alignItems: "center", justifyContent: "center" }}>
+                    <Text style={{ fontSize: 16 }}>⚡</Text>
+                  </View>
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.gold }}>Alertas de Presupuesto</Text>
+                </View>
+                {alerts.map(({ cat, pct }, idx) => (
+                  <View key={cat}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                      <CatIcon cat={cat} size={36} />
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+                          <Text style={{ fontSize: 13, fontWeight: "600", color: C.t1 }}>{cat}</Text>
+                          <Tag label={Math.round(pct) + "%"} color={pct > 100 ? C.rose : C.gold} />
+                        </View>
+                        <Bar pct={pct} color={CATS[cat]?.color} h={6} showGlow />
+                      </View>
+                    </View>
+                    {idx < alerts.length - 1 && <Divider />}
+                  </View>
+                ))}
+              </Card>
+            </FadeIn>
+          )}
+
+          {/* Gastos del mes */}
+          {Object.keys(ct).length > 0 && (
+            <FadeIn delay={200}>
+              <Card style={{ marginBottom: 14 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Gastos del mes</Text>
+                  <Tag label={money(totalExp, cur)} color={C.rose} />
+                </View>
+                {Object.entries(ct).sort((a, b) => b[1] - a[1]).map(([cat, amt], idx) => {
+                  const info = CATS[cat] || CATS["Otro"];
+                  const pct = totalExp > 0 ? (amt / totalExp) * 100 : 0;
+                  return (
+                    <View key={cat} style={{ marginBottom: idx < Object.keys(ct).length - 1 ? 14 : 0 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 7 }}>
+                        <CatIcon cat={cat} size={38} />
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
+                            <Text style={{ fontSize: 13, fontWeight: "600", color: C.t2 }}>{cat}</Text>
+                            <Text style={{ fontSize: 13, fontWeight: "800", color: C.t1 }}>{money(amt, cur)}</Text>
+                          </View>
+                          <Bar pct={(amt / maxCat) * 100} color={info.color} h={5} showGlow />
+                        </View>
+                        <Text style={{ fontSize: 11, color: C.t3, width: 34, textAlign: "right" }}>{Math.round(pct)}%</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </Card>
+            </FadeIn>
+          )}
+
+          {/* Últimos movimientos */}
+          <FadeIn delay={240}>
+            <Card style={{ marginBottom: 14 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Últimos movimientos</Text>
+                {expenses.length > 0
+                  ? <TouchableOpacity onPress={() => setShowHistorial(true)}>
+                      <Tag label={"Ver todos (" + expenses.length + ")"} color={C.sky} />
+                    </TouchableOpacity>
+                  : null}
+              </View>
+
+              {expenses.length === 0 ? (
+                /* "El vacío debe doler" — gráfica de barras vacía con potencial */
+                <View style={{ paddingVertical: 8 }}>
+                  <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, height: 80, marginBottom: 10 }}>
+                    {[40, 65, 30, 80, 50, 70, 45].map((h, i) => (
+                      <View key={i} style={{ flex: 1, alignItems: "center", justifyContent: "flex-end", height: 80 }}>
+                        <View style={{ width: "100%", height: h, borderRadius: 8, backgroundColor: C.mint + "15",
+                          borderWidth: 1, borderColor: C.mint + "25", borderStyle: "dashed" }} />
+                      </View>
+                    ))}
+                  </View>
+                  <View style={{ alignItems: "center", paddingVertical: 10 }}>
+                    <Text style={{ fontSize: 13, fontWeight: "800", color: C.mint, letterSpacing: -0.3 }}>Tu potencial de ahorro aquí</Text>
+                    <Text style={{ fontSize: 11, color: C.t3, marginTop: 4, textAlign: "center", lineHeight: 17 }}>
+                      Cada gasto registrado construye{"\n"}tu mapa financiero real.
+                    </Text>
+                    <TouchableOpacity onPress={() => setShowFAB(true)} style={{ marginTop: 14, backgroundColor: C.mintBg2,
+                      borderRadius: 12, borderWidth: 1, borderColor: C.mint + "45", paddingHorizontal: 18, paddingVertical: 9 }}>
+                      <Text style={{ fontSize: 13, fontWeight: "700", color: C.mint }}>+ Registrar primer gasto</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                expenses.slice(0, 6).map((e, i) => {
+                  const info = CATS[e.cat] || CATS["Otro"];
+                  return (
+                    <View key={e.id}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                        <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: info.color + "18",
+                          borderWidth: 1, borderColor: info.color + "30", alignItems: "center", justifyContent: "center" }}>
+                          <Text style={{ fontSize: 20 }}>{info.icon}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 13, fontWeight: "700", color: C.t1 }} numberOfLines={1}>{e.desc}</Text>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
+                            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: info.color }} />
+                            <Text style={{ fontSize: 10, color: C.t3 }}>{e.cat} · {e.date}</Text>
+                          </View>
+                        </View>
+                        <Text style={{ fontSize: 15, fontWeight: "800", color: C.rose }}>-{money(e.amount, cur)}</Text>
+                      </View>
+                      {i < Math.min(expenses.length, 6) - 1 && <View style={{ height: 1, backgroundColor: C.border, marginVertical: 11, marginLeft: 56 }} />}
+                    </View>
+                  );
+                })
+              )}
+            </Card>
+          </FadeIn>
+
+        </ScrollView>
+      </SafeAreaView>
+
+      {/* FAB Modal */}
+      <FABModal visible={showFAB} onClose={() => setShowFAB(false)} onSave={onAddExpense} cur={cur} />
+      <HistorialModal visible={showHistorial} onClose={() => setShowHistorial(false)}
+        expenses={expenses} onDelete={onDeleteExpense} cur={cur} />
+      <IngresosModal visible={showIngresos} onClose={() => setShowIngresos(false)}
+        income={income} onSave={onUpdateIncome} cur={cur} />
+    </View>
   );
 }
 
 // ─────────────────────────────────────────────
-// CHAT
+// CHAT IA — Motor completo
 // ─────────────────────────────────────────────
+const API_KEY = "TU_API_KEY_AQUI"; // ← Reemplaza con tu key de console.anthropic.com
+
 function ChatScreen({ state, addExpense }) {
-  const { user, income, debts, budgets } = state;
+  const { user, income, debts, budgets, goals, expenses: allExp } = state;
   const cur = user.currency;
   const totalInc = income.reduce((a, i) => a + i.amount, 0);
-  const [msgs, setMsgs] = useState([{
-    bot: true,
-    text: "Hola " + user.name + "! 👋 Soy tu asistente financiero IA.\n\nPuedo ayudarte:\n• \"Gaste 800 en gasolina hoy\"\n• \"Cuanto llevo en alimentacion?\"\n• \"Dame consejos para ahorrar mas\"\n• \"Como estan mis deudas?\"",
-  }]);
+  const totalExp = allExp.reduce((a, e) => a + e.amount, 0);
+  const balance  = totalInc - totalExp;
+
+  // Construir contexto financiero completo para la IA
+  const buildContext = () => {
+    const ct = {};
+    allExp.forEach(e => { ct[e.cat] = (ct[e.cat] || 0) + e.amount; });
+    const runway = calcRunway(balance, allExp);
+    const savePct = totalInc > 0 ? Math.round((balance / totalInc) * 100) : 0;
+    const debtTotal = debts.reduce((a, d) => a + d.balance, 0);
+    const debtInterestMonth = debts.reduce((a, d) => a + (d.balance * d.rate / 100 / 12), 0);
+
+    return `Eres TARS, el asistente financiero de élite de ${user.name} en República Dominicana.
+Moneda: ${cur}. Fecha actual: ${new Date().toLocaleDateString("es-DO", { weekday:"long", day:"numeric", month:"long" })}.
+
+SITUACIÓN FINANCIERA ACTUAL:
+- Balance disponible: ${money(balance, cur)}
+- Ingresos mensuales: ${money(totalInc, cur)}
+- Gastos del mes: ${money(totalExp, cur)}
+- Tasa de ahorro: ${savePct}%
+- Días de runway (sin ingresos): ${runway ?? "N/A"} días
+- Deuda total: ${money(debtTotal, cur)}
+- Intereses quemados/mes: ${money(Math.round(debtInterestMonth), cur)}
+- Gastos por categoría: ${JSON.stringify(ct)}
+- Deudas: ${debts.map(d => `${d.name}: ${money(d.balance, cur)} al ${d.rate}%`).join(", ") || "ninguna"}
+- Metas activas: ${goals?.map(g => `${g.emoji}${g.name}: ${Math.round((g.saved/g.target)*100)}%`).join(", ") || "ninguna"}
+
+INSTRUCCIONES:
+- Responde SIEMPRE en español dominicano coloquial con emojis estratégicos
+- Máximo 3 párrafos cortos, directos y accionables
+- Si detectas gasto de lujo (>RD$2000 en categoría Ocio/otro), menciona las horas de trabajo que cuesta
+- Si el runway es <30 días, incluye esa advertencia
+- Si hay deudas con tasa >20%, sugiere atacarlas primero
+- Sé brutalmente honesto pero motivador, estilo mentor financiero dominicano
+- Cuando des cifras usa el formato ${cur}X,XXX`;
+  };
+
+  const WELCOME = `¡Qué lo qué, ${user.name}! 🚀 Soy TARS, tu asesor financiero.\n\nTengo tu situación al día:\n💰 Balance: ${money(balance, cur)}\n📊 Ahorro este mes: ${totalInc > 0 ? Math.round((balance/totalInc)*100) : 0}%\n\nPuedo ayudarte con:\n• "Gasté 800 en gasolina"\n• "¿Cuánto llevo en comida?"\n• "¿Me conviene pagar la tarjeta BHD?"\n• "Analiza mis finanzas"\n• "¿Cuánto me cuesta esta cena de RD$3,500?"`;
+
+  const [msgs,    setMsgs]    = useState([{ bot: true, text: WELCOME }]);
   const [input,   setInput]   = useState("");
   const [loading, setLoading] = useState(false);
   const scroll = useRef(null);
@@ -825,54 +1281,153 @@ function ChatScreen({ state, addExpense }) {
     setLoading(true);
 
     const low = msg.toLowerCase();
-    const isEntry = /gast[eé]|pagu[eé]|compr[eé]/.test(low);
-    const parsed = nlp(msg);
 
+    // ── Detección de intenciones locales (sin API) ──
+    const isEntry = /gast[eé]|pagu[eé]|compr[eé]|sali[oó]/.test(low);
+    const parsed  = nlp(msg);
+
+    // Registrar gasto
     if (isEntry && parsed.amount) {
       const newE = { id: Date.now(), desc: parsed.desc, amount: parsed.amount, cat: parsed.cat, date: parsed.date };
       addExpense(newE);
+      const hours = lifeHours(parsed.amount, totalInc);
+      const hoursMsg = hours && hours >= 2 ? `\n⏱ Eso son ${hours} horas de tu trabajo.` : "";
+      const budgetRem = budgets[parsed.cat] ? Math.max(0, budgets[parsed.cat] - ((allExp.filter(e=>e.cat===parsed.cat).reduce((a,e)=>a+e.amount,0)) + parsed.amount)) : null;
+      const budgetMsg = budgetRem !== null ? `\n📊 Te quedan ${money(budgetRem, cur)} en ${parsed.cat} este mes.` : "";
       setLoading(false);
-      setMsgs(m => [...m, { bot: true, text: "✅ Guardado!\n\n" + (CATS[parsed.cat]?.icon || "💸") + " " + parsed.desc + "\n" + cur + parsed.amount.toLocaleString() + " · " + parsed.cat + "\n" + parsed.date }]);
+      setMsgs(m => [...m, { bot: true, text: `✅ Registrado!\n\n${CATS[parsed.cat]?.icon || "💸"} ${parsed.desc}\n${money(parsed.amount, cur)} · ${parsed.cat} · ${parsed.date}${hoursMsg}${budgetMsg}` }]);
       return;
     }
 
-    const ct = {};
-    state.expenses.forEach(e => { ct[e.cat] = (ct[e.cat] || 0) + e.amount; });
-    const totalExp = state.expenses.reduce((a, e) => a + e.amount, 0);
-    const sys = "Eres asistente financiero personal. Usuario: " + user.name + ". Moneda: " + cur + ". Balance: " + money(totalInc - totalExp, cur) + ", Gastos: " + JSON.stringify(ct) + ", Deudas: " + debts.map(d => d.name + ":" + money(d.balance, cur)).join(", ") + ". Responde en espanol dominicano, amigable, con emojis. Maximo 3 parrafos cortos.";
+    // Consulta de categoría sin API
+    const catMatch = Object.keys(CATS).find(k => low.includes(k.toLowerCase()));
+    const isQuery  = /cuánto|cuanto|llevo|gast[eé] en|total/.test(low) && catMatch;
+    if (isQuery) {
+      const spent = allExp.filter(e => e.cat === catMatch).reduce((a, e) => a + e.amount, 0);
+      const bud   = budgets[catMatch];
+      const pct   = bud ? Math.round((spent / bud) * 100) : null;
+      setLoading(false);
+      setMsgs(m => [...m, { bot: true, text: `📊 ${CATS[catMatch]?.icon} **${catMatch}** este mes:\n\n${money(spent, cur)} gastados${bud ? ` de ${money(bud, cur)} (${pct}%)` : ""}\n\n${pct > 90 ? "⚠️ Casi al límite, cuidado." : pct > 70 ? "👀 Vas bien pero vigila." : "✅ Dentro del presupuesto."}` }]);
+      return;
+    }
 
+    // ── Llamada a la API de Anthropic ──
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": "TU_API_KEY_AQUI", "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 800, system: sys, messages: [{ role: "user", content: msg }] }),
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": API_KEY,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 600,
+          system: buildContext(),
+          messages: [{ role: "user", content: msg }],
+        }),
       });
       const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
       setMsgs(m => [...m, { bot: true, text: data.content?.[0]?.text || "No pude responder." }]);
-    } catch {
-      setMsgs(m => [...m, { bot: true, text: "Para registrar gastos escribe: \"Gaste [monto] en [concepto]\"\n\nPara activar la IA completa agrega tu API key de Anthropic en el codigo." }]);
+    } catch (err) {
+      // Fallback inteligente sin API
+      const runway = calcRunway(balance, allExp);
+      const savePct = totalInc > 0 ? Math.round((balance/totalInc)*100) : 0;
+      let fallback = `🤖 TARS sin conexión, pero aquí va:\n\n`;
+      if (/analiza|resumen|cómo estoy|como estoy/.test(low)) {
+        fallback += `💰 Balance: ${money(balance, cur)}\n📈 Ahorro: ${savePct}%\n`;
+        if (runway) fallback += `⏳ Runway: ${runway} días\n`;
+        fallback += savePct >= 20 ? `\n✅ Vas excelente. Mantén ese ritmo.` : `\n⚠️ Tu ahorro está bajo. Revisa gastos de Ocio.`;
+      } else if (/cuánto cuesta|vale la pena|debo comprar/.test(low) && parsed.amount) {
+        const hours = lifeHours(parsed.amount, totalInc);
+        fallback += hours ? `⏱ ${money(parsed.amount, cur)} = ${hours} horas de tu trabajo.\n¿Vale ${hours} horas de tu vida?` : `Agrega tu API key en App.js para respuestas completas.`;
+      } else {
+        fallback += `Para respuestas de IA completas, agrega tu API key de console.anthropic.com en la línea "const API_KEY".`;
+      }
+      setMsgs(m => [...m, { bot: true, text: fallback }]);
     }
     setLoading(false);
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={["top"]}>
-      <Section sup="ASISTENTE" title="Chat IA 🤖" />
+      {/* Header */}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 18, paddingTop: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: C.border }}>
+        <View>
+          <Text style={{ fontSize: 10, color: C.t3, letterSpacing: 2, fontWeight: "700" }}>ASISTENTE</Text>
+          <Text style={{ fontSize: 20, fontWeight: "900", color: C.t1, letterSpacing: -0.5 }}>TARS <Text style={{ color: C.mint }}>IA</Text> 🤖</Text>
+        </View>
+        <View style={{ backgroundColor: C.mintBg2, borderRadius: 10, borderWidth: 1, borderColor: C.mint + "40", paddingHorizontal: 10, paddingVertical: 5 }}>
+          <Text style={{ fontSize: 11, fontWeight: "700", color: C.mint }}>{money(balance, cur)}</Text>
+          <Text style={{ fontSize: 9, color: C.t3, textAlign: "center" }}>disponible</Text>
+        </View>
+      </View>
+
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={90}>
-        <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 20 }} showsVerticalScrollIndicator={false} onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}>
+        <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
+          showsVerticalScrollIndicator={false}
+          onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}>
           {msgs.map((m, i) => (
-            <View key={i} style={{ marginBottom: 10, alignItems: m.bot ? "flex-start" : "flex-end" }}>
-              <View style={{ maxWidth: "82%", padding: 13, borderRadius: 16, backgroundColor: m.bot ? C.card : C.mint, borderWidth: m.bot ? 1 : 0, borderColor: C.border, borderBottomRightRadius: m.bot ? 16 : 4, borderBottomLeftRadius: m.bot ? 4 : 16 }}>
-                <Text style={{ fontSize: 13, color: m.bot ? C.t1 : "#000", lineHeight: 20, fontWeight: m.bot ? "400" : "600" }}>{m.text}</Text>
-              </View>
+            <View key={i} style={{ marginBottom: 12, alignItems: m.bot ? "flex-start" : "flex-end" }}>
+              {m.bot && (
+                <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
+                  <View style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: C.mintBg2, borderWidth: 1, borderColor: C.mint + "40", alignItems: "center", justifyContent: "center", marginBottom: 2 }}>
+                    <Text style={{ fontSize: 14 }}>🤖</Text>
+                  </View>
+                  <View style={{ maxWidth: "80%", padding: 13, borderRadius: 18, borderBottomLeftRadius: 4,
+                    backgroundColor: C.card, borderWidth: 1, borderColor: C.border2 }}>
+                    <Text style={{ fontSize: 13, color: C.t1, lineHeight: 21 }}>{m.text}</Text>
+                  </View>
+                </View>
+              )}
+              {!m.bot && (
+                <View style={{ maxWidth: "80%", padding: 13, borderRadius: 18, borderBottomRightRadius: 4,
+                  backgroundColor: C.mint }}>
+                  <Text style={{ fontSize: 13, color: "#000", lineHeight: 21, fontWeight: "600" }}>{m.text}</Text>
+                </View>
+              )}
             </View>
           ))}
-          {loading && <ActivityIndicator color={C.mint} style={{ alignSelf: "flex-start", margin: 8 }} />}
+          {loading && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <View style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: C.mintBg2, alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: 14 }}>🤖</Text>
+              </View>
+              <View style={{ backgroundColor: C.card, borderRadius: 14, borderWidth: 1, borderColor: C.border2, padding: 12, flexDirection: "row", gap: 4 }}>
+                {[0, 1, 2].map(j => <View key={j} style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: C.mint, opacity: 0.6 }} />)}
+              </View>
+            </View>
+          )}
         </ScrollView>
+
+        {/* Sugerencias rápidas */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 14, paddingBottom: 6, maxHeight: 44 }}>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {["Analiza mis finanzas", "¿Cuánto llevo en comida?", "Consejo para ahorrar", "¿Cómo están mis deudas?"].map(s => (
+              <TouchableOpacity key={s} onPress={() => { setInput(s); }}
+                style={{ paddingHorizontal: 12, paddingVertical: 7, backgroundColor: C.card2, borderRadius: 10, borderWidth: 1, borderColor: C.border2 }}>
+                <Text style={{ fontSize: 11, color: C.t2, fontWeight: "600" }}>{s}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+
         <View style={{ flexDirection: "row", gap: 10, padding: 14, paddingBottom: 20, backgroundColor: C.bg, borderTopWidth: 1, borderTopColor: C.border }}>
-          <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Escribe un gasto o pregunta..." placeholderTextColor={C.t4} value={input} onChangeText={setInput} onSubmitEditing={send} returnKeyType="send" />
-          <TouchableOpacity onPress={send} style={{ width: 48, height: 48, backgroundColor: C.mint, borderRadius: 14, alignItems: "center", justifyContent: "center" }} activeOpacity={0.8}>
-            <Text style={{ fontSize: 20, color: "#000", fontWeight: "800" }}>↑</Text>
+          <TextInput
+            style={[styles.input, { flex: 1, marginBottom: 0 }]}
+            placeholder="Escribe un gasto o pregunta a TARS..."
+            placeholderTextColor={C.t3}
+            value={input} onChangeText={setInput}
+            onSubmitEditing={send} returnKeyType="send"
+            multiline maxHeight={100}
+          />
+          <TouchableOpacity onPress={send}
+            style={{ width: 48, height: 48, backgroundColor: loading ? C.t4 : C.mint, borderRadius: 14,
+              alignItems: "center", justifyContent: "center",
+              shadowColor: C.mint, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.4, shadowRadius: 8 }}
+            activeOpacity={0.8} disabled={loading}>
+            <Text style={{ fontSize: 20, color: "#000", fontWeight: "900" }}>↑</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -1857,21 +2412,36 @@ export default function App() {
 
   // APP PRINCIPAL
   const s = appState;
+
+  const addExpenseWithStreak = (e) => {
+    const today = new Date().toISOString().split("T")[0];
+    const streak = s.streakDays || [];
+    const newStreak = streak.includes(today) ? streak : [...streak, today];
+    updateState({ expenses: [e, ...s.expenses], streakDays: newStreak });
+  };
+
+  const deleteExpense = (id) => {
+    updateState({ expenses: s.expenses.filter(e => e.id !== id) });
+  };
+
+  const updateIncome = (inc) => updateState({ income: inc });
+
+  const [showFABGlobal, setShowFABGlobal] = useState(false);
+
   return (
     <SafeAreaProvider>
       <View style={{ flex: 1, backgroundColor: C.bg }}>
         <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-        {tab === "home"         && <HomeScreen          state={s} openSettings={() => setShowSettings(true)} />}
-        {tab === "chat"         && <ChatScreen          state={s} addExpense={e => {
-          const today = new Date().toISOString().split("T")[0];
-          const streak = s.streakDays || [];
-          const newStreak = streak.includes(today) ? streak : [...streak, today];
-          updateState({ expenses: [e, ...s.expenses], streakDays: newStreak });
-        }} />}
-        {tab === "deudas"       && <DeudasScreen        state={s} setDebts={v  => updateState({ debts: v })} />}
-        {tab === "metas"        && <MetasScreen         state={s} setGoals={v  => updateState({ goals: v })} />}
-        {tab === "herramientas" && <HerramientasScreen  state={s} setReminders={v => updateState({ reminders: v })} />}
+        {tab === "home"         && <HomeScreen state={s} openSettings={() => setShowSettings(true)}
+          onAddExpense={addExpenseWithStreak} onUpdateIncome={updateIncome} onDeleteExpense={deleteExpense} />}
+        {tab === "chat"         && <ChatScreen state={s} addExpense={addExpenseWithStreak} />}
+        {tab === "deudas"       && <DeudasScreen state={s} setDebts={v => updateState({ debts: v })} />}
+        {tab === "metas"        && <MetasScreen state={s} setGoals={v => updateState({ goals: v })} />}
+        {tab === "herramientas" && <HerramientasScreen state={s} setReminders={v => updateState({ reminders: v })} />}
         <NavBar tab={tab} setTab={setTab} />
+        {/* FAB global — visible en todas las pantallas excepto chat */}
+        {tab !== "chat" && <FAB onPress={() => setShowFABGlobal(true)} />}
+        <FABModal visible={showFABGlobal} onClose={() => setShowFABGlobal(false)} onSave={addExpenseWithStreak} cur={s.user?.currency || "RD$"} />
         {showSettings && <SettingsModal state={s} updateState={updateState} onClose={() => setShowSettings(false)} />}
       </View>
     </SafeAreaProvider>
