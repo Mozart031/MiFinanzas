@@ -3,7 +3,7 @@ import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, ActivityIndicator, KeyboardAvoidingView,
   Platform, StatusBar, Alert, Dimensions, Animated,
-  Modal, Pressable,
+  Modal, Pressable, Switch, Vibration,
 } from "react-native";
 import { SafeAreaView, SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -52,20 +52,24 @@ function applyTheme(isDark) {
 const DEF_BUDGETS = { Alimentacion: 8000, Transporte: 4000, Ocio: 3000, Suscripciones: 1500 };
 
 const CATS = {
-  Alimentacion:  { icon: "🛒", color: C.mint   },
-  Transporte:    { icon: "⛽", color: C.sky    },
-  Ocio:          { icon: "🎮", color: C.pink   },
-  Salud:         { icon: "💊", color: C.green  },
-  Suscripciones: { icon: "📱", color: C.violet },
-  Hogar:         { icon: "🏠", color: C.orange },
-  Educacion:     { icon: "📚", color: C.gold   },
-  Otro:          { icon: "💸", color: C.t3     },
+  Alimentacion:  { icon: "🛒", color: C.mint,   isEssential: true  },
+  Transporte:    { icon: "⛽", color: C.sky,    isEssential: true  },
+  Ocio:          { icon: "🎮", color: C.pink,   isEssential: false },
+  Salud:         { icon: "💊", color: C.green,  isEssential: true  },
+  Suscripciones: { icon: "📱", color: C.violet, isEssential: false },
+  Hogar:         { icon: "🏠", color: C.orange, isEssential: true  },
+  Educacion:     { icon: "📚", color: C.gold,   isEssential: true  },
+  Lujos:         { icon: "💎", color: C.rose,   isEssential: false },
+  Otro:          { icon: "💸", color: C.t3,     isEssential: false },
 };
+
+// Categorias bloqueables en modo emergencia
+const BLOCKABLE_CATS = ["Ocio", "Suscripciones", "Lujos"];
 
 // ─────────────────────────────────────────────
 // STORAGE — guardado simple y directo
 // ─────────────────────────────────────────────
-const STORE_KEY = "mifinanzas_v6";
+const STORE_KEY = "mifinanzas_v7";
 
 function loadApp() {
   return AsyncStorage.getItem(STORE_KEY)
@@ -85,7 +89,8 @@ const TODAY = new Date();
 const DAY   = TODAY.getDate();
 const DAYS_IN_MONTH = new Date(TODAY.getFullYear(), TODAY.getMonth() + 1, 0).getDate();
 
-function money(n, cur) {
+function money(n, cur, hideAmount = false) {
+  if (hideAmount) return (cur || "RD$") + "••••";
   return (cur || "RD$") + Math.abs(Math.round(n)).toLocaleString();
 }
 
@@ -96,10 +101,11 @@ function nlp(text) {
   let cat = "Otro";
   if (/gasolina|uber|combustible|transport/.test(low)) cat = "Transporte";
   else if (/comida|supermercado|nacional|bravo|restaurante|almuerzo|cena/.test(low)) cat = "Alimentacion";
-  else if (/netflix|spotify|suscripci|disney|amazon/.test(low)) cat = "Suscripciones";
+  else if (/netflix|spotify|suscripci|disney|amazon|hbo|youtube|prime/.test(low)) cat = "Suscripciones";
   else if (/farmacia|medic|doctor|salud|pastilla/.test(low)) cat = "Salud";
-  else if (/ocio|fiesta|cine|bar|juego/.test(low)) cat = "Ocio";
+  else if (/ocio|fiesta|cine|bar|juego|entretenimiento/.test(low)) cat = "Ocio";
   else if (/casa|hogar|alquiler|luz|agua/.test(low)) cat = "Hogar";
+  else if (/lujo|joya|reloj|marca|gucci|louis/.test(low)) cat = "Lujos";
   const today = new Date().toISOString().split("T")[0];
   const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
   const date = /ayer/.test(low) ? yesterday : today;
@@ -108,25 +114,47 @@ function nlp(text) {
   return { amount, cat, date, desc: raw.charAt(0).toUpperCase() + raw.slice(1) };
 }
 
-function score(expenses, income, budgets) {
+// Score financiero con semaforo
+function score(expenses, income, budgets, debts = [], goals = []) {
   const exp = expenses.reduce((a, e) => a + e.amount, 0);
   const save = income > 0 ? ((income - exp) / income) * 100 : 0;
   const ct = {};
   expenses.forEach(e => { ct[e.cat] = (ct[e.cat] || 0) + e.amount; });
   const cats = Object.entries(budgets);
   const over = cats.filter(([k, l]) => (ct[k] || 0) > l).length;
+  
+  // Calcular score de deuda
+  const totalDebt = debts.reduce((a, d) => a + d.balance, 0);
+  const debtScore = income > 0 ? Math.max(0, 100 - (totalDebt / income) * 20) : 85;
+  
+  // Calcular score de metas
+  const goalProgress = goals.length > 0 
+    ? goals.reduce((a, g) => a + (g.saved / g.target), 0) / goals.length * 100 
+    : 50;
+  
   const s = {
     ahorro:      Math.min(100, Math.max(0, save * 2.5)),
     presupuesto: cats.length ? Math.max(0, 100 - (over / cats.length) * 100) : 80,
     consistencia:Math.min(100, (expenses.length / 15) * 100),
-    deuda:       85,
+    deuda:       Math.min(100, debtScore),
+    metas:       Math.min(100, goalProgress),
   };
-  const total = Math.round(s.ahorro * .4 + s.presupuesto * .3 + s.consistencia * .2 + s.deuda * .1);
+  const total = Math.round(s.ahorro * .35 + s.presupuesto * .25 + s.consistencia * .15 + s.deuda * .15 + s.metas * .10);
   const grade = total >= 85 ? { label: "Excelente", color: C.green,  emoji: "🏆" }
               : total >= 70 ? { label: "Bueno",     color: C.mint,   emoji: "✅" }
               : total >= 50 ? { label: "Regular",   color: C.gold,   emoji: "⚠️" }
-              :               { label: "Critico",   color: C.rose,   emoji: "🚨" };
+              : total >= 25 ? { label: "Critico",   color: C.rose,   emoji: "🚨" }
+              :               { label: "Peligro",   color: C.rose,   emoji: "🔥" };
   return { total, s, grade };
+}
+
+// Sistema semaforo para balance
+function getTrafficLight(balance, income) {
+  if (income <= 0) return { status: "unknown", color: C.t3, label: "Sin datos" };
+  const pct = (balance / income) * 100;
+  if (pct >= 50) return { status: "green", color: C.green, label: "Disponible", emoji: "🟢" };
+  if (pct >= 25) return { status: "yellow", color: C.gold, label: "Precaucion", emoji: "🟡" };
+  return { status: "red", color: C.rose, label: "Alerta", emoji: "🔴" };
 }
 
 function payoffMonths(balance, rate, payment) {
@@ -181,6 +209,38 @@ function survivalMode(expenses, income, day) {
     return totalExp >= halfInc * 0.8;
   }
   return totalExp >= totalInc * 0.9;
+}
+
+// Detectar suscripciones recurrentes
+function detectSubscriptions(expenses) {
+  const recurring = {};
+  const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+  
+  expenses.forEach(e => {
+    if (e.cat === "Suscripciones" || /netflix|spotify|disney|hbo|amazon|prime|youtube|gym|gimnasio/i.test(e.desc)) {
+      const key = e.desc.toLowerCase().trim();
+      if (!recurring[key]) {
+        recurring[key] = { desc: e.desc, amount: e.amount, count: 1, lastDate: e.date };
+      } else {
+        recurring[key].count++;
+        if (e.date > recurring[key].lastDate) recurring[key].lastDate = e.date;
+      }
+    }
+  });
+  
+  return Object.values(recurring).filter(r => r.count >= 1);
+}
+
+// Calcular redondeo sugerido
+function calcRoundUp(amount, roundTo = 100) {
+  const rounded = Math.ceil(amount / roundTo) * roundTo;
+  return rounded - amount;
+}
+
+// Verificar si el freno de emergencia esta activo
+function isEmergencyBrakeActive(brakeUntil) {
+  if (!brakeUntil) return false;
+  return new Date(brakeUntil) > new Date();
 }
 
 // ─────────────────────────────────────────────
@@ -251,28 +311,54 @@ function Bar({ pct, color, h, bg, showGlow }) {
   );
 }
 
-// Donut circular para metas / score
-function Donut({ pct, size, strokeWidth, color, children }) {
-  const r = (size - strokeWidth) / 2;
-  const circ = 2 * Math.PI * r;
-  const filled = circ * Math.min(pct / 100, 1);
-  // SVG-like via borderRadius trick
-  const deg = (pct / 100) * 360;
+// Circulo de Score Financiero con animacion de pulso
+function ScoreCircle({ score, grade, size = 80, showPulse = false }) {
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  
+  useEffect(() => {
+    if (showPulse && score < 40) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 1.08, duration: 800, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+        ])
+      ).start();
+    }
+  }, [showPulse, score]);
+  
+  const strokeWidth = size * 0.08;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const progress = (score / 100) * 360;
+  
   return (
-    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+    <Animated.View style={{ 
+      width: size, height: size, alignItems: "center", justifyContent: "center",
+      transform: [{ scale: pulseAnim }]
+    }}>
       {/* Background ring */}
-      <View style={{ position: "absolute", width: size, height: size, borderRadius: size / 2, borderWidth: strokeWidth, borderColor: C.border2 }} />
-      {/* Progress arc using rotation clipping trick */}
-      <View style={{ position: "absolute", width: size, height: size, borderRadius: size / 2, borderWidth: strokeWidth, borderColor: color,
-        borderTopColor: deg > 90 ? color : "transparent",
-        borderRightColor: deg > 180 ? color : "transparent",
-        borderBottomColor: deg > 270 ? color : "transparent",
-        borderLeftColor: deg > 360 ? color : "transparent",
-        transform: [{ rotate: "-90deg" }],
-        opacity: pct > 0 ? 1 : 0,
+      <View style={{ 
+        position: "absolute", width: size, height: size, borderRadius: size / 2, 
+        borderWidth: strokeWidth, borderColor: C.border2 
       }} />
-      <View style={{ alignItems: "center", justifyContent: "center" }}>{children}</View>
-    </View>
+      {/* Progress ring */}
+      <View style={{ 
+        position: "absolute", width: size, height: size, borderRadius: size / 2, 
+        borderWidth: strokeWidth, borderColor: grade.color,
+        borderTopColor: progress >= 0 ? grade.color : "transparent",
+        borderRightColor: progress >= 90 ? grade.color : "transparent",
+        borderBottomColor: progress >= 180 ? grade.color : "transparent",
+        borderLeftColor: progress >= 270 ? grade.color : "transparent",
+        transform: [{ rotate: "-90deg" }],
+        opacity: score > 0 ? 1 : 0,
+      }} />
+      {/* Center content */}
+      <View style={{ alignItems: "center", justifyContent: "center" }}>
+        {score < 40 && <Text style={{ fontSize: size * 0.18, marginBottom: -2 }}>🚨</Text>}
+        <Text style={{ fontSize: size * 0.35, fontWeight: "900", color: grade.color }}>{score}</Text>
+        <Text style={{ fontSize: size * 0.1, color: C.t3, letterSpacing: 0.5 }}>SCORE</Text>
+      </View>
+    </Animated.View>
   );
 }
 
@@ -303,12 +389,18 @@ function Section({ sup, title, right }) {
 }
 
 // Icono de categoría con fondo de color
-function CatIcon({ cat, size }) {
+function CatIcon({ cat, size, blocked }) {
   const s = size || 44;
   const info = CATS[cat] || CATS["Otro"];
   return (
-    <View style={{ width: s, height: s, borderRadius: s * 0.3, backgroundColor: info.color + "20", borderWidth: 1, borderColor: info.color + "30", alignItems: "center", justifyContent: "center" }}>
-      <Text style={{ fontSize: s * 0.42 }}>{info.icon}</Text>
+    <View style={{ 
+      width: s, height: s, borderRadius: s * 0.3, 
+      backgroundColor: blocked ? C.t4 : info.color + "20", 
+      borderWidth: 1, borderColor: blocked ? C.t3 : info.color + "30", 
+      alignItems: "center", justifyContent: "center",
+      opacity: blocked ? 0.5 : 1,
+    }}>
+      <Text style={{ fontSize: s * 0.42 }}>{blocked ? "🚫" : info.icon}</Text>
     </View>
   );
 }
@@ -344,12 +436,14 @@ function FadeIn({ children, delay = 0, style }) {
 }
 
 // ─────────────────────────────────────────────
-// FAB — Modal de registro rápido
+// FAB — Modal de registro rápido con Redondeo
 // ─────────────────────────────────────────────
-function FABModal({ visible, onClose, onSave, cur }) {
+function FABModal({ visible, onClose, onSave, cur, goals, emergencyBrakeActive, onRoundUp }) {
   const [desc,   setDesc]   = useState("");
   const [amount, setAmount] = useState("");
   const [cat,    setCat]    = useState("Otro");
+  const [showRoundUp, setShowRoundUp] = useState(false);
+  const [selectedGoal, setSelectedGoal] = useState(null);
   const slideAnim = useRef(new Animated.Value(400)).current;
 
   useEffect(() => {
@@ -360,15 +454,99 @@ function FABModal({ visible, onClose, onSave, cur }) {
     }
   }, [visible]);
 
+  const roundUpAmount = amount ? calcRoundUp(+amount) : 0;
+
   const save = () => {
     if (!amount || isNaN(+amount)) return;
     const today = new Date().toISOString().split("T")[0];
+    
+    // Verificar si la categoria esta bloqueada
+    if (emergencyBrakeActive && BLOCKABLE_CATS.includes(cat)) {
+      Alert.alert(
+        "🚫 Categoria Bloqueada",
+        `El Freno de Emergencia esta activo. No puedes registrar gastos en "${cat}" hasta que termine el periodo de bloqueo.`,
+        [{ text: "Entendido", style: "cancel" }]
+      );
+      return;
+    }
+    
     onSave({ id: Date.now(), desc: desc.trim() || cat, amount: +amount, cat, date: today });
+    
+    // Mostrar opcion de redondeo si hay metas y el redondeo es > 0
+    if (roundUpAmount > 0 && goals && goals.length > 0) {
+      setShowRoundUp(true);
+    } else {
+      resetAndClose();
+    }
+  };
+  
+  const handleRoundUp = () => {
+    if (selectedGoal && roundUpAmount > 0) {
+      onRoundUp(selectedGoal, roundUpAmount);
+      Vibration.vibrate(50);
+    }
+    resetAndClose();
+  };
+  
+  const resetAndClose = () => {
     setDesc(""); setAmount(""); setCat("Otro");
+    setShowRoundUp(false); setSelectedGoal(null);
     onClose();
   };
 
   if (!visible) return null;
+  
+  // Pantalla de redondeo
+  if (showRoundUp) {
+    return (
+      <Modal transparent animationType="none" visible={visible} onRequestClose={resetAndClose}>
+        <Pressable style={{ flex: 1, backgroundColor: "#000000BB", justifyContent: "flex-end" }} onPress={resetAndClose}>
+          <Animated.View
+            style={{ transform: [{ translateY: slideAnim }] }}
+            onStartShouldSetResponder={() => true}
+          >
+            <View style={{ backgroundColor: C.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, borderColor: C.mint + "50", padding: 20, paddingBottom: 36 }}>
+              <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: C.border2, alignSelf: "center", marginBottom: 18 }} />
+              
+              <View style={{ alignItems: "center", marginBottom: 20 }}>
+                <View style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: C.mintBg2, alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+                  <Text style={{ fontSize: 32 }}>💰</Text>
+                </View>
+                <Text style={{ fontSize: 18, fontWeight: "900", color: C.t1, textAlign: "center" }}>Redondeo Inteligente</Text>
+                <Text style={{ fontSize: 13, color: C.t2, textAlign: "center", marginTop: 6 }}>
+                  Gastaste {cur}{amount}. Redondea a {cur}{Math.ceil(+amount / 100) * 100} y ahorra:
+                </Text>
+                <Text style={{ fontSize: 32, fontWeight: "900", color: C.mint, marginTop: 8 }}>{cur}{roundUpAmount}</Text>
+              </View>
+              
+              <Text style={{ fontSize: 12, color: C.t3, marginBottom: 10, fontWeight: "700" }}>ENVIAR A:</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {(goals || []).map(g => (
+                    <TouchableOpacity key={g.id} onPress={() => setSelectedGoal(g.id)}
+                      style={{ paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14, borderWidth: 2,
+                        borderColor: selectedGoal === g.id ? C.mint : C.border,
+                        backgroundColor: selectedGoal === g.id ? C.mintBg2 : C.card2,
+                        alignItems: "center", minWidth: 100 }}>
+                      <Text style={{ fontSize: 24, marginBottom: 4 }}>{g.emoji}</Text>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: selectedGoal === g.id ? C.mint : C.t2 }}>{g.name}</Text>
+                      <Text style={{ fontSize: 10, color: C.t3, marginTop: 2 }}>{Math.round((g.saved / g.target) * 100)}%</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+              
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <Btn label="No gracias" onPress={resetAndClose} ghost style={{ flex: 1 }} />
+                <Btn label="Ahorrar" onPress={handleRoundUp} disabled={!selectedGoal} style={{ flex: 2 }} icon="💰" />
+              </View>
+            </View>
+          </Animated.View>
+        </Pressable>
+      </Modal>
+    );
+  }
+  
   return (
     <Modal transparent animationType="none" visible={visible} onRequestClose={onClose}>
       <Pressable style={{ flex: 1, backgroundColor: "#000000BB", justifyContent: "flex-end" }} onPress={onClose}>
@@ -384,18 +562,30 @@ function FABModal({ visible, onClose, onSave, cur }) {
             {/* Categoría chips */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
               <View style={{ flexDirection: "row", gap: 8 }}>
-                {Object.entries(CATS).map(([key, val]) => (
-                  <TouchableOpacity key={key} onPress={() => setCat(key)}
-                    style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1.5,
-                      borderColor: cat === key ? val.color : C.border,
-                      backgroundColor: cat === key ? val.color + "22" : C.card2 }}>
-                    <Text style={{ fontSize: 12, fontWeight: "700", color: cat === key ? val.color : C.t3 }}>
-                      {val.icon} {key}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                {Object.entries(CATS).map(([key, val]) => {
+                  const isBlocked = emergencyBrakeActive && BLOCKABLE_CATS.includes(key);
+                  return (
+                    <TouchableOpacity key={key} onPress={() => !isBlocked && setCat(key)}
+                      disabled={isBlocked}
+                      style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1.5,
+                        borderColor: isBlocked ? C.t4 : cat === key ? val.color : C.border,
+                        backgroundColor: isBlocked ? C.t5 : cat === key ? val.color + "22" : C.card2,
+                        opacity: isBlocked ? 0.5 : 1 }}>
+                      <Text style={{ fontSize: 12, fontWeight: "700", color: isBlocked ? C.t4 : cat === key ? val.color : C.t3 }}>
+                        {isBlocked ? "🚫" : val.icon} {key}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             </ScrollView>
+
+            {emergencyBrakeActive && (
+              <View style={{ backgroundColor: C.roseBg2, borderRadius: 12, padding: 10, marginBottom: 12, flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text style={{ fontSize: 16 }}>🚨</Text>
+                <Text style={{ fontSize: 11, color: C.rose, flex: 1 }}>Freno de emergencia activo. Ocio, Suscripciones y Lujos bloqueados.</Text>
+              </View>
+            )}
 
             <Input value={desc} onChange={setDesc} placeholder={`Descripción (ej: Almuerzo, Uber...)`} />
             <View style={{ flexDirection: "row", gap: 10 }}>
@@ -408,6 +598,17 @@ function FABModal({ visible, onClose, onSave, cur }) {
                 <Text style={{ fontSize: 24, color: "#000", fontWeight: "900" }}>✓</Text>
               </TouchableOpacity>
             </View>
+            
+            {/* Preview de redondeo */}
+            {amount && +amount > 0 && roundUpAmount > 0 && goals && goals.length > 0 && (
+              <View style={{ backgroundColor: C.mintBg, borderRadius: 12, padding: 12, marginTop: 10, flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Text style={{ fontSize: 18 }}>💡</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: C.mint, fontWeight: "700" }}>Redondeo disponible</Text>
+                  <Text style={{ fontSize: 10, color: C.t3 }}>Ahorra {cur}{roundUpAmount} al confirmar</Text>
+                </View>
+              </View>
+            )}
           </View>
         </Animated.View>
       </Pressable>
@@ -442,7 +643,7 @@ function FAB({ onPress }) {
 // ─────────────────────────────────────────────
 // HISTORIAL MODAL — gastos completos con filtros y eliminar
 // ─────────────────────────────────────────────
-function HistorialModal({ visible, onClose, expenses, onDelete, cur }) {
+function HistorialModal({ visible, onClose, expenses, onDelete, cur, hideAmounts }) {
   const [filterCat, setFilterCat] = useState("Todos");
   const slideAnim = useRef(new Animated.Value(600)).current;
 
@@ -466,7 +667,7 @@ function HistorialModal({ visible, onClose, expenses, onDelete, cur }) {
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 20, borderBottomWidth: 1, borderBottomColor: C.border }}>
             <View>
               <Text style={{ fontSize: 20, fontWeight: "900", color: C.t1, letterSpacing: -0.5 }}>Historial completo</Text>
-              <Text style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{filtered.length} movimientos · {money(total, cur)}</Text>
+              <Text style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{filtered.length} movimientos · {money(total, cur, hideAmounts)}</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: C.card2, alignItems: "center", justifyContent: "center" }}>
               <Text style={{ color: C.t2, fontSize: 18, fontWeight: "700" }}>✕</Text>
@@ -498,7 +699,7 @@ function HistorialModal({ visible, onClose, expenses, onDelete, cur }) {
             {filtered.length === 0 ? (
               <View style={{ alignItems: "center", paddingVertical: 48 }}>
                 <Text style={{ fontSize: 40, marginBottom: 12 }}>🔍</Text>
-                <Text style={{ fontSize: 15, color: C.t3 }}>Sin registros en esta categoría</Text>
+                <Text style={{ fontSize: 15, color: C.t3 }}>Sin registros en esta categoria</Text>
               </View>
             ) : (
               filtered.map((e, i) => {
@@ -517,7 +718,7 @@ function HistorialModal({ visible, onClose, expenses, onDelete, cur }) {
                           <Text style={{ fontSize: 10, color: C.t3 }}>{e.cat} · {e.date}</Text>
                         </View>
                       </View>
-                      <Text style={{ fontSize: 14, fontWeight: "800", color: C.rose }}>-{money(e.amount, cur)}</Text>
+                      <Text style={{ fontSize: 14, fontWeight: "800", color: C.rose }}>-{money(e.amount, cur, hideAmounts)}</Text>
                       <TouchableOpacity onPress={() => Alert.alert("Eliminar gasto", `¿Eliminar "${e.desc}"?`, [
                         { text: "Cancelar", style: "cancel" },
                         { text: "Eliminar", style: "destructive", onPress: () => onDelete(e.id) },
@@ -540,7 +741,7 @@ function HistorialModal({ visible, onClose, expenses, onDelete, cur }) {
 // ─────────────────────────────────────────────
 // INGRESOS MODAL — gestión de ingresos
 // ─────────────────────────────────────────────
-function IngresosModal({ visible, onClose, income, onSave, cur }) {
+function IngresosModal({ visible, onClose, income, onSave, cur, hideAmounts }) {
   const [list,    setList]    = useState(income);
   const [adding,  setAdding]  = useState(false);
   const [form,    setForm]    = useState({ source: "", amount: "", type: "fijo" });
@@ -571,7 +772,7 @@ function IngresosModal({ visible, onClose, income, onSave, cur }) {
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 20, borderBottomWidth: 1, borderBottomColor: C.border }}>
             <View>
               <Text style={{ fontSize: 20, fontWeight: "900", color: C.t1 }}>Mis Ingresos 💼</Text>
-              <Text style={{ fontSize: 11, color: C.mint, marginTop: 2, fontWeight: "700" }}>Total: {money(total, cur)}/mes</Text>
+              <Text style={{ fontSize: 11, color: C.mint, marginTop: 2, fontWeight: "700" }}>Total: {money(total, cur, hideAmounts)}/mes</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: C.card2, alignItems: "center", justifyContent: "center" }}>
               <Text style={{ color: C.t2, fontSize: 18, fontWeight: "700" }}>✕</Text>
@@ -588,7 +789,7 @@ function IngresosModal({ visible, onClose, income, onSave, cur }) {
                   <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>{inc.source}</Text>
                   <Tag label={inc.type === "fijo" ? "Fijo" : "Variable"} color={inc.type === "fijo" ? C.mint : C.gold} size="sm" />
                 </View>
-                <Text style={{ fontSize: 16, fontWeight: "800", color: C.mint }}>{money(inc.amount, cur)}</Text>
+                <Text style={{ fontSize: 16, fontWeight: "800", color: C.mint }}>{money(inc.amount, cur, hideAmounts)}</Text>
                 <TouchableOpacity onPress={() => { const u = list.filter(x => x.id !== inc.id); setList(u); onSave(u); }}>
                   <Text style={{ color: C.t4, fontSize: 20 }}>×</Text>
                 </TouchableOpacity>
@@ -618,6 +819,151 @@ function IngresosModal({ visible, onClose, income, onSave, cur }) {
             )}
           </ScrollView>
         </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─────────────────────────────────────────────
+// FRENO DE EMERGENCIA MODAL
+// ─────────────────────────────────────────────
+function EmergencyBrakeModal({ visible, onClose, onActivate, brakeUntil }) {
+  const isActive = isEmergencyBrakeActive(brakeUntil);
+  const timeLeft = isActive ? Math.max(0, Math.ceil((new Date(brakeUntil) - new Date()) / (1000 * 60 * 60))) : 0;
+  
+  if (!visible) return null;
+  
+  return (
+    <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
+      <Pressable style={{ flex: 1, backgroundColor: "#000000DD", justifyContent: "center", alignItems: "center", padding: 24 }} onPress={onClose}>
+        <View style={{ backgroundColor: C.card, borderRadius: 24, padding: 24, width: "100%", maxWidth: 340, borderWidth: 2, borderColor: isActive ? C.rose : C.gold }}
+          onStartShouldSetResponder={() => true}>
+          
+          <View style={{ alignItems: "center", marginBottom: 20 }}>
+            <View style={{ width: 80, height: 80, borderRadius: 24, backgroundColor: isActive ? C.roseBg2 : C.goldBg2, alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+              <Text style={{ fontSize: 40 }}>{isActive ? "🛑" : "🚨"}</Text>
+            </View>
+            <Text style={{ fontSize: 22, fontWeight: "900", color: C.t1, textAlign: "center" }}>
+              Freno de Emergencia
+            </Text>
+            <Text style={{ fontSize: 13, color: C.t2, textAlign: "center", marginTop: 8, lineHeight: 20 }}>
+              {isActive 
+                ? `Activo. Las categorias de Ocio, Suscripciones y Lujos estan bloqueadas.`
+                : "Activa el freno para bloquear gastos innecesarios durante 48 horas."
+              }
+            </Text>
+          </View>
+          
+          {isActive && (
+            <View style={{ backgroundColor: C.roseBg, borderRadius: 16, padding: 16, marginBottom: 20, alignItems: "center" }}>
+              <Text style={{ fontSize: 12, color: C.rose, fontWeight: "700", marginBottom: 4 }}>TIEMPO RESTANTE</Text>
+              <Text style={{ fontSize: 32, fontWeight: "900", color: C.rose }}>{timeLeft}h</Text>
+            </View>
+          )}
+          
+          <View style={{ backgroundColor: C.card2, borderRadius: 14, padding: 14, marginBottom: 20 }}>
+            <Text style={{ fontSize: 12, fontWeight: "700", color: C.t1, marginBottom: 8 }}>Categorias bloqueadas:</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {BLOCKABLE_CATS.map(cat => (
+                <View key={cat} style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: C.roseBg, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}>
+                  <Text style={{ fontSize: 14 }}>🚫</Text>
+                  <Text style={{ fontSize: 12, color: C.rose, fontWeight: "600" }}>{cat}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+          
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <Btn label="Cerrar" onPress={onClose} ghost style={{ flex: 1 }} />
+            {!isActive && (
+              <Btn 
+                label="Activar 48h" 
+                onPress={() => { onActivate(); onClose(); }} 
+                danger 
+                style={{ flex: 2 }} 
+                icon="🛑" 
+              />
+            )}
+          </View>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// ─────────────────────────────────────────────
+// SUSCRIPCIONES MODAL (Corte de Grasa)
+// ─────────────────────────────────────────────
+function SubscriptionsModal({ visible, onClose, expenses, cur }) {
+  const subscriptions = detectSubscriptions(expenses);
+  const totalMonthly = subscriptions.reduce((a, s) => a + s.amount, 0);
+  
+  if (!visible) return null;
+  
+  return (
+    <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: "#000000CC" }}>
+        <View style={{ flex: 1, marginTop: 80, backgroundColor: C.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, borderColor: C.border2 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 20, borderBottomWidth: 1, borderBottomColor: C.border }}>
+            <View>
+              <Text style={{ fontSize: 20, fontWeight: "900", color: C.t1 }}>Corte de Grasa ✂️</Text>
+              <Text style={{ fontSize: 11, color: C.violet, marginTop: 2, fontWeight: "700" }}>
+                {subscriptions.length} suscripciones detectadas
+              </Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: C.card2, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ color: C.t2, fontSize: 18, fontWeight: "700" }}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          
+          {totalMonthly > 0 && (
+            <View style={{ margin: 16, backgroundColor: C.violetBg, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.violet + "40" }}>
+              <Text style={{ fontSize: 11, color: C.violet, letterSpacing: 1.5, marginBottom: 4 }}>GASTO MENSUAL EN SUSCRIPCIONES</Text>
+              <Text style={{ fontSize: 28, fontWeight: "900", color: C.violet }}>{money(totalMonthly, cur)}</Text>
+              <Text style={{ fontSize: 11, color: C.t3, marginTop: 4 }}>{money(totalMonthly * 12, cur)} al año</Text>
+            </View>
+          )}
+          
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+            {subscriptions.length === 0 ? (
+              <View style={{ alignItems: "center", paddingVertical: 48 }}>
+                <Text style={{ fontSize: 48, marginBottom: 12 }}>✨</Text>
+                <Text style={{ fontSize: 16, fontWeight: "700", color: C.t1, marginBottom: 6 }}>Sin suscripciones detectadas</Text>
+                <Text style={{ fontSize: 13, color: C.t3, textAlign: "center" }}>Registra tus gastos de servicios como Netflix, Spotify, etc.</Text>
+              </View>
+            ) : (
+              subscriptions.map((sub, i) => (
+                <View key={i} style={{ backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: C.border }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                    <View style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: C.violetBg, alignItems: "center", justifyContent: "center" }}>
+                      <Text style={{ fontSize: 22 }}>📱</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>{sub.desc}</Text>
+                      <Text style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>Ultimo pago: {sub.lastDate}</Text>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      <Text style={{ fontSize: 16, fontWeight: "800", color: C.violet }}>{money(sub.amount, cur)}</Text>
+                      <Text style={{ fontSize: 10, color: C.t3 }}>/mes</Text>
+                    </View>
+                  </View>
+                  
+                  <View style={{ marginTop: 12, backgroundColor: C.card2, borderRadius: 10, padding: 10 }}>
+                    <Text style={{ fontSize: 11, color: C.gold, fontWeight: "700" }}>¿Has usado este servicio en los ultimos 15 dias?</Text>
+                    <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                      <TouchableOpacity style={{ flex: 1, paddingVertical: 8, borderRadius: 8, backgroundColor: C.mintBg, alignItems: "center" }}>
+                        <Text style={{ fontSize: 11, color: C.mint, fontWeight: "700" }}>Si, lo uso</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={{ flex: 1, paddingVertical: 8, borderRadius: 8, backgroundColor: C.roseBg, alignItems: "center" }}>
+                        <Text style={{ fontSize: 11, color: C.rose, fontWeight: "700" }}>No, cancelar</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              ))
+            )}
+          </ScrollView>
+        </View>
       </View>
     </Modal>
   );
@@ -677,7 +1023,6 @@ function Onboarding({ onDone }) {
   );
 
   function submit() {
-    // Build all data synchronously — no async at all here
     const userData = { name: name.trim() || "Usuario", currency: cur };
     const goals = gName && gTarget
       ? [{ id: 1, name: gName, emoji: gEmoji, target: +gTarget, saved: 0, weeks: +gWeeks }]
@@ -688,7 +1033,6 @@ function Onboarding({ onDone }) {
     const budgets = {};
     Object.entries(bud).forEach(([k, v]) => { if (v) budgets[k] = +v; });
 
-    // Call onDone immediately — synchronous
     onDone({
       user:     userData,
       goals:    goals,
@@ -714,10 +1058,10 @@ function Onboarding({ onDone }) {
           </Text>
           {[
             ["⚡", "Registra gastos con voz o texto"],
+            ["🚨", "Sistema semaforo y freno de emergencia"],
             ["📊", "Alertas inteligentes de presupuesto"],
-            ["💳", "Gestion completa de deudas y tarjetas"],
-            ["🎯", "Metas de ahorro con progreso visual"],
-            ["💾", "Datos guardados aunque cierres la app"],
+            ["💎", "Redondeo automatico para ahorro"],
+            ["🔒", "Modo privacidad para ocultar balances"],
           ].map(([ic, tx]) => (
             <View key={tx} style={{ flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 10, width: "100%", padding: 14, backgroundColor: C.card, borderRadius: 14, borderWidth: 1, borderColor: C.border }}>
               <Text style={{ fontSize: 18 }}>{ic}</Text>
@@ -764,7 +1108,7 @@ function Onboarding({ onDone }) {
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <View style={{ backgroundColor: C.mintBg, borderRadius: 14, borderWidth: 1, borderColor: C.mint + "40", padding: 14, marginBottom: 20 }}>
           <Text style={{ fontSize: 12, color: C.mint, fontWeight: "700", marginBottom: 3 }}>Por que lo pedimos?</Text>
-          <Text style={{ fontSize: 12, color: C.t2, lineHeight: 18 }}>Calculamos tu tasa de ahorro, alertas y proyecciones personalizadas.</Text>
+          <Text style={{ fontSize: 12, color: C.t2, lineHeight: 18 }}>Calculamos tu tasa de ahorro, sistema semaforo y alertas personalizadas.</Text>
         </View>
         <Text style={styles.lbl}>INGRESO FIJO MENSUAL ({cur})</Text>
         <Input value={inc} onChange={setInc} placeholder="ej: 45000" numeric />
@@ -814,44 +1158,52 @@ function Onboarding({ onDone }) {
     </SafeAreaView>
   );
 
-  // PANTALLA 4 — PRIMERA META
+  // PANTALLA 4 — META DE AHORRO
   if (step === 4) return (
     <SafeAreaView style={styles.obWrap}>
       {dots}
       <Text style={styles.obH}>Tu primera meta 🎯</Text>
-      <Text style={styles.obSub}>Que quieres lograr? (opcional, puedes saltarte)</Text>
+      <Text style={styles.obSub}>Define un objetivo de ahorro. (opcional)</Text>
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <Text style={styles.lbl}>QUE QUIERES LOGRAR?</Text>
-        <Input value={gName} onChange={setGName} placeholder="ej: Laptop, Viaje, Fondo de emergencia..." />
-        <View style={{ flexDirection: "row", gap: 10 }}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.lbl}>EMOJI</Text>
-            <Input value={gEmoji} onChange={setGEmoji} style={{ textAlign: "center", fontSize: 26 }} />
+        <Text style={styles.lbl}>NOMBRE DE LA META</Text>
+        <Input value={gName} onChange={setGName} placeholder="ej: Fondo de Emergencia, Viaje..." />
+        <Text style={[styles.lbl, { marginTop: 12 }]}>EMOJI</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {["🎯", "🏠", "✈️", "🚗", "💻", "📱", "🎓", "💍", "🏖️", "🎸"].map(e => (
+              <TouchableOpacity key={e} onPress={() => setGEmoji(e)}
+                style={{ width: 48, height: 48, borderRadius: 12, borderWidth: 2,
+                  borderColor: gEmoji === e ? C.mint : C.border,
+                  backgroundColor: gEmoji === e ? C.mintBg : C.card2,
+                  alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: 22 }}>{e}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
-          <View style={{ flex: 2.5 }}>
-            <Text style={styles.lbl}>CUANTO CUESTA ({cur})</Text>
-            <Input value={gTarget} onChange={setGTarget} placeholder="ej: 50000" numeric />
-          </View>
-        </View>
-        <Text style={styles.lbl}>PLAZO</Text>
-        <View style={{ flexDirection: "row", gap: 8, marginTop: 8, marginBottom: 16 }}>
-          {[["4","1 mes"],["12","3 meses"],["24","6 meses"],["52","1 ano"]].map(([w, l]) => (
-            <TouchableOpacity key={w} onPress={() => setGWeeks(w)} style={{ flex: 1, paddingVertical: 11, borderRadius: 12, borderWidth: 1.5, borderColor: gWeeks === w ? C.mint : C.border, backgroundColor: gWeeks === w ? C.mintBg : C.card, alignItems: "center" }}>
-              <Text style={{ fontSize: 11, fontWeight: "700", color: gWeeks === w ? C.mint : C.t3 }}>{l}</Text>
+        </ScrollView>
+        <Text style={styles.lbl}>MONTO OBJETIVO ({cur})</Text>
+        <Input value={gTarget} onChange={setGTarget} placeholder="ej: 50000" numeric />
+        <Text style={[styles.lbl, { marginTop: 12 }]}>PLAZO EN SEMANAS</Text>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          {["12", "24", "36", "52"].map(w => (
+            <TouchableOpacity key={w} onPress={() => setGWeeks(w)}
+              style={{ flex: 1, paddingVertical: 12, borderRadius: 11, borderWidth: 1.5, alignItems: "center",
+                borderColor: gWeeks === w ? C.mint : C.border,
+                backgroundColor: gWeeks === w ? C.mintBg : C.card2 }}>
+              <Text style={{ fontSize: 13, fontWeight: "700", color: gWeeks === w ? C.mint : C.t3 }}>{w} sem</Text>
             </TouchableOpacity>
           ))}
         </View>
-        {!!gName && !!gTarget && (
-          <View style={{ backgroundColor: C.mintBg, borderRadius: 12, borderWidth: 1, borderColor: C.mint + "40", padding: 14, marginBottom: 16 }}>
-            <Text style={{ fontSize: 12, color: C.t2 }}>
-              Aparta <Text style={{ color: C.mint, fontWeight: "700" }}>{cur}{Math.ceil(+gTarget / +gWeeks).toLocaleString()}/semana</Text> durante {gWeeks} semanas.
-            </Text>
+        {gName && gTarget && (
+          <View style={{ backgroundColor: C.mintBg, borderRadius: 14, padding: 14, marginTop: 16 }}>
+            <Text style={{ fontSize: 12, color: C.mint, fontWeight: "700" }}>Ahorro semanal sugerido:</Text>
+            <Text style={{ fontSize: 24, fontWeight: "800", color: C.mint }}>{cur}{Math.ceil(+gTarget / +gWeeks).toLocaleString()}</Text>
           </View>
         )}
       </ScrollView>
       <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
         <Btn label="Atras" onPress={() => setStep(3)} ghost style={{ flex: 1 }} />
-        <Btn label="Empezar! 🚀" onPress={submit} style={{ flex: 2 }} />
+        <Btn label="Finalizar ✓" onPress={submit} style={{ flex: 2 }} />
       </View>
     </SafeAreaView>
   );
@@ -860,133 +1212,10 @@ function Onboarding({ onDone }) {
 }
 
 // ─────────────────────────────────────────────
-// UTILIDADES DE RACHA Y RESUMEN
+// HOME SCREEN
 // ─────────────────────────────────────────────
-
-// Devuelve los últimos N días como strings YYYY-MM-DD
-function lastNDays(n) {
-  return Array.from({ length: n }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (n - 1 - i));
-    return d.toISOString().split("T")[0];
-  });
-}
-
-// Mensaje motivacional basado en racha
-function streakMessage(streak, registeredToday) {
-  if (!registeredToday && streak === 0) return { msg: "Empieza tu racha hoy 💪", sub: "Registra un gasto para comenzar", color: C.t3, emoji: "🌱" };
-  if (!registeredToday && streak > 0) return { msg: `¡No pierdas tu racha de ${streak} días!`, sub: "Registra algo hoy antes de medianoche", color: C.rose, emoji: "⚠️" };
-  if (streak >= 30) return { msg: `${streak} días imparable 🔥`, sub: "Eres una máquina financiera. ¡Increíble!", color: C.gold, emoji: "👑" };
-  if (streak >= 14) return { msg: `${streak} días en racha`, sub: "Dos semanas seguidas. ¡Eso es hábito!", color: C.orange, emoji: "🔥" };
-  if (streak >= 7)  return { msg: `${streak} días seguidos`, sub: "Una semana completa. ¡Sigue así!", color: C.mint, emoji: "🔥" };
-  if (streak >= 3)  return { msg: `${streak} días de racha`, sub: "Vas bien, no lo rompas hoy", color: C.mint, emoji: "🔥" };
-  if (streak === 1) return { msg: "¡Primer día registrado!", sub: "El primer paso es el más importante", color: C.sky, emoji: "✨" };
-  return { msg: "Racha iniciada", sub: "Sigue registrando cada día", color: C.mint, emoji: "🔥" };
-}
-
-// Calcula gastos por semana del mes actual
-function weeklyBreakdown(expenses) {
-  const weeks = [0, 0, 0, 0, 0];
-  expenses.forEach(e => {
-    const d = new Date(e.date);
-    if (d.getMonth() !== TODAY.getMonth() || d.getFullYear() !== TODAY.getFullYear()) return;
-    const wk = Math.min(Math.floor((d.getDate() - 1) / 7), 4);
-    weeks[wk] += e.amount;
-  });
-  return weeks.slice(0, Math.ceil(DAYS_IN_MONTH / 7));
-}
-
-// ─────────────────────────────────────────────
-// STREAK BANNER — estilo Duolingo
-// ─────────────────────────────────────────────
-function StreakBanner({ streakDays = [], onPress }) {
-  const today     = new Date().toISOString().split("T")[0];
-  const streak    = calcStreak(streakDays);
-  const regToday  = streakDays.includes(today);
-  const { msg, sub, color, emoji } = streakMessage(streak, regToday);
-  const last7     = lastNDays(7);
-
-  // Tamaño del fuego según racha
-  const fireSize  = streak >= 14 ? 44 : streak >= 7 ? 40 : streak >= 3 ? 36 : 30;
-
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.85}
-      style={{
-        marginHorizontal: 16, marginBottom: 14, borderRadius: 22,
-        borderWidth: 1, borderColor: color + "50",
-        backgroundColor: color + "0D",
-        shadowColor: color, shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.2, shadowRadius: 14, elevation: 6,
-        overflow: "hidden",
-      }}
-    >
-      {/* Top row */}
-      <View style={{ flexDirection: "row", alignItems: "center", padding: 16, paddingBottom: 12, gap: 14 }}>
-        {/* Flame icon con ring */}
-        <View style={{
-          width: fireSize + 20, height: fireSize + 20, borderRadius: (fireSize + 20) / 2,
-          backgroundColor: color + "20", borderWidth: 2, borderColor: color + "45",
-          alignItems: "center", justifyContent: "center",
-        }}>
-          <Text style={{ fontSize: fireSize }}>{emoji}</Text>
-        </View>
-        {/* Text */}
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 16, fontWeight: "900", color, letterSpacing: -0.3 }}>{msg}</Text>
-          <Text style={{ fontSize: 11, color: C.t3, marginTop: 3, lineHeight: 15 }}>{sub}</Text>
-        </View>
-        {/* Contador grande */}
-        <View style={{ alignItems: "center" }}>
-          <Text style={{ fontSize: 28, fontWeight: "900", color, letterSpacing: -1 }}>{streak}</Text>
-          <Text style={{ fontSize: 9, color: C.t3, letterSpacing: 1, fontWeight: "700" }}>DÍAS</Text>
-        </View>
-      </View>
-
-      {/* Separador */}
-      <View style={{ height: 1, backgroundColor: color + "25", marginHorizontal: 16 }} />
-
-      {/* Mini calendario últimos 7 días */}
-      <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12 }}>
-        {last7.map((day, i) => {
-          const done      = streakDays.includes(day);
-          const isToday   = day === today;
-          const dayLabel  = new Date(day + "T12:00:00").toLocaleDateString("es", { weekday: "narrow" });
-          const dayNum    = new Date(day + "T12:00:00").getDate();
-          return (
-            <View key={day} style={{ alignItems: "center", gap: 4 }}>
-              <Text style={{ fontSize: 9, color: isToday ? color : C.t3, fontWeight: isToday ? "800" : "400", letterSpacing: 0.5 }}>
-                {dayLabel.toUpperCase()}
-              </Text>
-              <View style={{
-                width: 32, height: 32, borderRadius: 10,
-                backgroundColor: done ? color : (isToday ? color + "18" : C.card2),
-                borderWidth: isToday && !done ? 1.5 : done ? 0 : 1,
-                borderColor: isToday && !done ? color + "60" : C.border,
-                alignItems: "center", justifyContent: "center",
-              }}>
-                {done
-                  ? <Text style={{ fontSize: 14 }}>🔥</Text>
-                  : <Text style={{ fontSize: 12, fontWeight: "700", color: isToday ? color : C.t4 }}>{dayNum}</Text>
-                }
-              </View>
-              {isToday && (
-                <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: done ? color : C.t4 }} />
-              )}
-            </View>
-          );
-        })}
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-// ─────────────────────────────────────────────
-// HOME
-// ─────────────────────────────────────────────
-function HomeScreen({ state, openSettings, onAddExpense, onUpdateIncome, onDeleteExpense }) {
-  const { expenses, income, budgets, user, streakDays = [] } = state;
+function HomeScreen({ state, openSettings, onAddExpense, onUpdateIncome, onDeleteExpense, onTogglePrivacy, onActivateEmergencyBrake, onRoundUp }) {
+  const { expenses, income, budgets, user, streakDays = [], goals = [], debts = [], hideAmounts = false, emergencyBrakeUntil } = state;
   const cur = user.currency;
   const totalExp = expenses.reduce((a, e) => a + e.amount, 0);
   const totalInc = income.reduce((a, i) => a + i.amount, 0);
@@ -995,35 +1224,42 @@ function HomeScreen({ state, openSettings, onAddExpense, onUpdateIncome, onDelet
   const ct = {};
   expenses.forEach(e => { ct[e.cat] = (ct[e.cat] || 0) + e.amount; });
   const maxCat = Math.max(...Object.values(ct), 1);
-  const { total: sc, grade } = score(expenses, totalInc, budgets);
+  const { total: sc, grade } = score(expenses, totalInc, budgets, debts, goals);
+  const trafficLight = getTrafficLight(balance, totalInc);
   const alerts = Object.entries(budgets)
     .map(([cat, lim]) => ({ cat, pct: ((ct[cat] || 0) / lim) * 100 }))
     .filter(a => a.pct >= 70)
     .sort((a, b) => b.pct - a.pct);
   const runway   = calcRunway(balance, expenses);
   const isSurvival = survivalMode(expenses, income, DAY);
+  const emergencyBrakeActive = isEmergencyBrakeActive(emergencyBrakeUntil);
 
-  const [showFAB,       setShowFAB]       = useState(false);
-  const [showHistorial, setShowHistorial] = useState(false);
-  const [showIngresos,  setShowIngresos]  = useState(false);
+  const [showFAB,         setShowFAB]         = useState(false);
+  const [showHistorial,   setShowHistorial]   = useState(false);
+  const [showIngresos,    setShowIngresos]    = useState(false);
+  const [showEmergency,   setShowEmergency]   = useState(false);
+  const [showSubscriptions, setShowSubscriptions] = useState(false);
 
   return (
     <View style={{ flex: 1, backgroundColor: isSurvival ? "#0A0006" : C.bg }}>
       <SafeAreaView style={{ flex: 1 }} edges={["top"]}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 130 }}>
 
-          {/* Header */}
+          {/* Header con Score */}
           <FadeIn delay={0}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 18, paddingTop: 14, paddingBottom: 10 }}>
-              <View>
-                <Text style={{ fontSize: 12, color: C.t3, letterSpacing: 0.5 }}>Hola, <Text style={{ color: C.t2, fontWeight: "600" }}>{user.name}</Text> 👋</Text>
-                <Text style={{ fontSize: 24, fontWeight: "900", color: C.t1, letterSpacing: -1, marginTop: 1 }}>Mi<Text style={{ color: isSurvival ? C.rose : C.mint }}>Finanzas</Text></Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                <ScoreCircle score={sc} grade={grade} size={56} showPulse={sc < 40} />
+                <View>
+                  <Text style={{ fontSize: 12, color: C.t3, letterSpacing: 0.5 }}>Hola, <Text style={{ color: C.t2, fontWeight: "600" }}>{user.name}</Text> 👋</Text>
+                  <Text style={{ fontSize: 20, fontWeight: "900", color: C.t1, letterSpacing: -0.5 }}>Mi<Text style={{ color: isSurvival ? C.rose : C.mint }}>Finanzas</Text></Text>
+                </View>
               </View>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <View style={{ backgroundColor: grade.color + "18", borderRadius: 12, borderWidth: 1, borderColor: grade.color + "40", paddingHorizontal: 11, paddingVertical: 7, flexDirection: "row", alignItems: "center", gap: 5 }}>
-                  <Text style={{ fontSize: 14 }}>{grade.emoji}</Text>
-                  <Text style={{ fontSize: 14, fontWeight: "800", color: grade.color }}>{sc}pts</Text>
-                </View>
+                {/* Boton privacidad */}
+                <TouchableOpacity onPress={onTogglePrivacy} style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: hideAmounts ? C.mintBg2 : C.card2, borderWidth: 1, borderColor: hideAmounts ? C.mint : C.border2, alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ fontSize: 18 }}>{hideAmounts ? "🙈" : "👁️"}</Text>
+                </TouchableOpacity>
                 <TouchableOpacity onPress={openSettings} style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border2, alignItems: "center", justifyContent: "center" }}>
                   <Text style={{ fontSize: 18 }}>⚙️</Text>
                 </TouchableOpacity>
@@ -1031,31 +1267,55 @@ function HomeScreen({ state, openSettings, onAddExpense, onUpdateIncome, onDelet
             </View>
           </FadeIn>
 
+          {/* FRENO DE EMERGENCIA BANNER */}
+          {emergencyBrakeActive && (
+            <FadeIn delay={30}>
+              <TouchableOpacity onPress={() => setShowEmergency(true)} style={{ marginHorizontal: 16, marginBottom: 12, borderRadius: 16, backgroundColor: C.roseBg2, borderWidth: 1.5, borderColor: C.rose + "60", padding: 12, flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Text style={{ fontSize: 24 }}>🛑</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "800", color: C.rose }}>FRENO DE EMERGENCIA ACTIVO</Text>
+                  <Text style={{ fontSize: 11, color: C.t2 }}>Ocio, Suscripciones y Lujos bloqueados</Text>
+                </View>
+                <Text style={{ fontSize: 12, color: C.rose, fontWeight: "700" }}>Ver →</Text>
+              </TouchableOpacity>
+            </FadeIn>
+          )}
+
           {/* MODO SUPERVIVENCIA — banner urgente */}
-          {isSurvival && (
+          {isSurvival && !emergencyBrakeActive && (
             <FadeIn delay={50}>
-              <View style={{ marginHorizontal: 16, marginBottom: 12, borderRadius: 18, backgroundColor: C.roseBg2,
+              <TouchableOpacity onPress={() => setShowEmergency(true)} style={{ marginHorizontal: 16, marginBottom: 12, borderRadius: 18, backgroundColor: C.roseBg2,
                 borderWidth: 1.5, borderColor: C.rose + "60", padding: 14, flexDirection: "row", alignItems: "center", gap: 12 }}>
                 <Text style={{ fontSize: 28 }}>🚨</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 13, fontWeight: "900", color: C.rose, letterSpacing: -0.3 }}>MODO SUPERVIVENCIA</Text>
-                  <Text style={{ fontSize: 11, color: C.t2, marginTop: 2, lineHeight: 16 }}>Has gastado el 80%+ antes de terminar el período. Prioriza solo necesidades.</Text>
+                  <Text style={{ fontSize: 11, color: C.t2, marginTop: 2, lineHeight: 16 }}>Has gastado el 80%+. Activa el freno de emergencia.</Text>
                 </View>
-              </View>
+                <View style={{ backgroundColor: C.rose, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}>
+                  <Text style={{ fontSize: 11, color: "#fff", fontWeight: "700" }}>Activar</Text>
+                </View>
+              </TouchableOpacity>
             </FadeIn>
           )}
 
-          {/* Hero Balance */}
+          {/* Hero Balance con Semaforo */}
           <FadeIn delay={80}>
             <View style={{ marginHorizontal: 16, marginBottom: 14, borderRadius: 24, overflow: "hidden", borderWidth: 1,
-              borderColor: isSurvival ? C.rose + "50" : C.mint + "40",
-              shadowColor: isSurvival ? C.rose : C.mint,
+              borderColor: trafficLight.color + "50",
+              shadowColor: trafficLight.color,
               shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.18, shadowRadius: 20, elevation: 8 }}>
-              <View style={{ backgroundColor: isSurvival ? "#140008" : "#00140F", padding: 20, paddingBottom: 0 }}>
+              <View style={{ backgroundColor: trafficLight.status === "red" ? "#140008" : trafficLight.status === "yellow" ? "#14100A" : "#00140F", padding: 20, paddingBottom: 0 }}>
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <View>
-                    <Text style={{ fontSize: 10, color: isSurvival ? C.rose : C.mint, letterSpacing: 3, fontWeight: "700", marginBottom: 6 }}>BALANCE DISPONIBLE</Text>
-                    <Text style={{ fontSize: 42, fontWeight: "900", color: isSurvival ? C.rose : C.mint, letterSpacing: -2, lineHeight: 48 }}>{money(balance, cur)}</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <Text style={{ fontSize: 10, color: trafficLight.color, letterSpacing: 3, fontWeight: "700" }}>BALANCE DISPONIBLE</Text>
+                      <View style={{ backgroundColor: trafficLight.color + "25", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                        <Text style={{ fontSize: 10, color: trafficLight.color, fontWeight: "800" }}>{trafficLight.label}</Text>
+                      </View>
+                    </View>
+                    <Text style={{ fontSize: 42, fontWeight: "900", color: trafficLight.color, letterSpacing: -2, lineHeight: 48 }}>
+                      {money(balance, cur, hideAmounts)}
+                    </Text>
                   </View>
                   {/* Runway badge */}
                   {runway !== null && (
@@ -1076,14 +1336,14 @@ function HomeScreen({ state, openSettings, onAddExpense, onUpdateIncome, onDelet
                   <Bar pct={savePct} color={savePct >= 20 ? C.mint : savePct >= 10 ? C.gold : C.rose} h={6} showGlow />
                 </View>
               </View>
-              {/* Stats row — ingresos clickeable */}
-              <View style={{ backgroundColor: isSurvival ? "#1A0010" : "#001A14", flexDirection: "row", borderTopWidth: 1, borderTopColor: (isSurvival ? C.rose : C.mint) + "20" }}>
-                <TouchableOpacity onPress={() => setShowIngresos(true)} style={{ flex: 1, paddingVertical: 14, alignItems: "center", borderRightWidth: 1, borderRightColor: (isSurvival ? C.rose : C.mint) + "20" }}>
-                  <Text style={{ fontSize: 15, fontWeight: "800", color: C.mint }}>{money(totalInc, cur)}</Text>
+              {/* Stats row */}
+              <View style={{ backgroundColor: trafficLight.status === "red" ? "#1A0010" : trafficLight.status === "yellow" ? "#1A1408" : "#001A14", flexDirection: "row", borderTopWidth: 1, borderTopColor: trafficLight.color + "20" }}>
+                <TouchableOpacity onPress={() => setShowIngresos(true)} style={{ flex: 1, paddingVertical: 14, alignItems: "center", borderRightWidth: 1, borderRightColor: trafficLight.color + "20" }}>
+                  <Text style={{ fontSize: 15, fontWeight: "800", color: C.mint }}>{money(totalInc, cur, hideAmounts)}</Text>
                   <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Ingresos ✏️</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setShowHistorial(true)} style={{ flex: 1, paddingVertical: 14, alignItems: "center", borderRightWidth: 1, borderRightColor: (isSurvival ? C.rose : C.mint) + "20" }}>
-                  <Text style={{ fontSize: 15, fontWeight: "800", color: C.rose }}>{money(totalExp, cur)}</Text>
+                <TouchableOpacity onPress={() => setShowHistorial(true)} style={{ flex: 1, paddingVertical: 14, alignItems: "center", borderRightWidth: 1, borderRightColor: trafficLight.color + "20" }}>
+                  <Text style={{ fontSize: 15, fontWeight: "800", color: C.rose }}>{money(totalExp, cur, hideAmounts)}</Text>
                   <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Gastos 📋</Text>
                 </TouchableOpacity>
                 <View style={{ flex: 1, paddingVertical: 14, alignItems: "center" }}>
@@ -1094,9 +1354,20 @@ function HomeScreen({ state, openSettings, onAddExpense, onUpdateIncome, onDelet
             </View>
           </FadeIn>
 
-          {/* Streak Banner */}
-          <FadeIn delay={120}>
-            <StreakBanner streakDays={streakDays} onPress={openSettings} />
+          {/* Acciones Rapidas */}
+          <FadeIn delay={100}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingLeft: 16, marginBottom: 14 }}>
+              <View style={{ flexDirection: "row", gap: 10, paddingRight: 16 }}>
+                <TouchableOpacity onPress={() => setShowEmergency(true)} style={{ backgroundColor: emergencyBrakeActive ? C.roseBg2 : C.card, borderRadius: 14, borderWidth: 1, borderColor: emergencyBrakeActive ? C.rose + "50" : C.border, paddingHorizontal: 14, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Text style={{ fontSize: 18 }}>🚨</Text>
+                  <Text style={{ fontSize: 12, fontWeight: "700", color: emergencyBrakeActive ? C.rose : C.t2 }}>Freno</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowSubscriptions(true)} style={{ backgroundColor: C.card, borderRadius: 14, borderWidth: 1, borderColor: C.border, paddingHorizontal: 14, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Text style={{ fontSize: 18 }}>✂️</Text>
+                  <Text style={{ fontSize: 12, fontWeight: "700", color: C.t2 }}>Suscripciones</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
           </FadeIn>
 
           {/* Alertas */}
@@ -1134,7 +1405,7 @@ function HomeScreen({ state, openSettings, onAddExpense, onUpdateIncome, onDelet
               <Card style={{ marginBottom: 14 }}>
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                   <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Gastos del mes</Text>
-                  <Tag label={money(totalExp, cur)} color={C.rose} />
+                  <Tag label={money(totalExp, cur, hideAmounts)} color={C.rose} />
                 </View>
                 {Object.entries(ct).sort((a, b) => b[1] - a[1]).map(([cat, amt], idx) => {
                   const info = CATS[cat] || CATS["Otro"];
@@ -1146,7 +1417,7 @@ function HomeScreen({ state, openSettings, onAddExpense, onUpdateIncome, onDelet
                         <View style={{ flex: 1 }}>
                           <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
                             <Text style={{ fontSize: 13, fontWeight: "600", color: C.t2 }}>{cat}</Text>
-                            <Text style={{ fontSize: 13, fontWeight: "800", color: C.t1 }}>{money(amt, cur)}</Text>
+                            <Text style={{ fontSize: 13, fontWeight: "800", color: C.t1 }}>{money(amt, cur, hideAmounts)}</Text>
                           </View>
                           <Bar pct={(amt / maxCat) * 100} color={info.color} h={5} showGlow />
                         </View>
@@ -1172,7 +1443,6 @@ function HomeScreen({ state, openSettings, onAddExpense, onUpdateIncome, onDelet
               </View>
 
               {expenses.length === 0 ? (
-                /* "El vacío debe doler" — gráfica de barras vacía con potencial */
                 <View style={{ paddingVertical: 8 }}>
                   <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, height: 80, marginBottom: 10 }}>
                     {[40, 65, 30, 80, 50, 70, 45].map((h, i) => (
@@ -1183,7 +1453,7 @@ function HomeScreen({ state, openSettings, onAddExpense, onUpdateIncome, onDelet
                     ))}
                   </View>
                   <View style={{ alignItems: "center", paddingVertical: 10 }}>
-                    <Text style={{ fontSize: 13, fontWeight: "800", color: C.mint, letterSpacing: -0.3 }}>Tu potencial de ahorro aquí</Text>
+                    <Text style={{ fontSize: 13, fontWeight: "800", color: C.mint, letterSpacing: -0.3 }}>Tu potencial de ahorro aqui</Text>
                     <Text style={{ fontSize: 11, color: C.t3, marginTop: 4, textAlign: "center", lineHeight: 17 }}>
                       Cada gasto registrado construye{"\n"}tu mapa financiero real.
                     </Text>
@@ -1210,7 +1480,7 @@ function HomeScreen({ state, openSettings, onAddExpense, onUpdateIncome, onDelet
                             <Text style={{ fontSize: 10, color: C.t3 }}>{e.cat} · {e.date}</Text>
                           </View>
                         </View>
-                        <Text style={{ fontSize: 15, fontWeight: "800", color: C.rose }}>-{money(e.amount, cur)}</Text>
+                        <Text style={{ fontSize: 15, fontWeight: "800", color: C.rose }}>-{money(e.amount, cur, hideAmounts)}</Text>
                       </View>
                       {i < Math.min(expenses.length, 6) - 1 && <View style={{ height: 1, backgroundColor: C.border, marginVertical: 11, marginLeft: 56 }} />}
                     </View>
@@ -1224,26 +1494,389 @@ function HomeScreen({ state, openSettings, onAddExpense, onUpdateIncome, onDelet
       </SafeAreaView>
 
       {/* FAB Modal */}
-      <FABModal visible={showFAB} onClose={() => setShowFAB(false)} onSave={onAddExpense} cur={cur} />
+      <FABModal 
+        visible={showFAB} 
+        onClose={() => setShowFAB(false)} 
+        onSave={onAddExpense} 
+        cur={cur} 
+        goals={goals}
+        emergencyBrakeActive={emergencyBrakeActive}
+        onRoundUp={onRoundUp}
+      />
       <HistorialModal visible={showHistorial} onClose={() => setShowHistorial(false)}
-        expenses={expenses} onDelete={onDeleteExpense} cur={cur} />
+        expenses={expenses} onDelete={onDeleteExpense} cur={cur} hideAmounts={hideAmounts} />
       <IngresosModal visible={showIngresos} onClose={() => setShowIngresos(false)}
-        income={income} onSave={onUpdateIncome} cur={cur} />
+        income={income} onSave={onUpdateIncome} cur={cur} hideAmounts={hideAmounts} />
+      <EmergencyBrakeModal 
+        visible={showEmergency} 
+        onClose={() => setShowEmergency(false)} 
+        onActivate={onActivateEmergencyBrake}
+        brakeUntil={emergencyBrakeUntil}
+      />
+      <SubscriptionsModal 
+        visible={showSubscriptions} 
+        onClose={() => setShowSubscriptions(false)} 
+        expenses={expenses}
+        cur={cur}
+      />
     </View>
   );
 }
 
 // ─────────────────────────────────────────────
-// CHAT IA — Motor completo
+// ESTRATEGIA SCREEN (Metas + Deudas Unificado)
+// ─────────────────────────────────────────────
+function EstrategiaScreen({ state, setGoals, setDebts }) {
+  const { user, goals, debts, income } = state;
+  const cur = user.currency;
+  const totalInc = income.reduce((a, i) => a + i.amount, 0);
+  
+  const [view, setView] = useState("resumen"); // resumen | metas | deudas
+  const [addingGoal, setAddingGoal] = useState(false);
+  const [addingDebt, setAddingDebt] = useState(false);
+  const [goalForm, setGoalForm] = useState({ name: "", emoji: "🎯", target: "", weeks: "24" });
+  const [debtForm, setDebtForm] = useState({ type: "tarjeta", name: "", balance: "", rate: "", minPay: "" });
+  
+  const totalDebt = debts.reduce((a, d) => a + d.balance, 0);
+  const totalSaved = goals.reduce((a, g) => a + g.saved, 0);
+  const totalTarget = goals.reduce((a, g) => a + g.target, 0);
+  const netWorth = totalSaved - totalDebt;
+  
+  const DEBT_TYPES = [
+    { id: "tarjeta",  icon: "💳", label: "Tarjeta",  color: C.rose   },
+    { id: "prestamo", icon: "🏦", label: "Prestamo", color: C.gold   },
+    { id: "hipoteca", icon: "🏠", label: "Hipoteca", color: C.sky    },
+    { id: "auto",     icon: "🚗", label: "Auto",     color: C.violet },
+    { id: "informal", icon: "🤝", label: "Informal", color: C.green  },
+  ];
+  
+  const goalColors = [C.sky, C.mint, C.violet, C.gold, C.orange, C.pink];
+  
+  const addGoal = () => {
+    if (!goalForm.name || !goalForm.target) return;
+    setGoals([...goals, { 
+      id: Date.now(), 
+      name: goalForm.name, 
+      emoji: goalForm.emoji, 
+      target: +goalForm.target, 
+      saved: 0, 
+      weeks: +goalForm.weeks 
+    }]);
+    setAddingGoal(false);
+    setGoalForm({ name: "", emoji: "🎯", target: "", weeks: "24" });
+  };
+  
+  const addDebt = () => {
+    if (!debtForm.name || !debtForm.balance) return;
+    const t = DEBT_TYPES.find(x => x.id === debtForm.type) || DEBT_TYPES[0];
+    setDebts([...debts, { 
+      id: Date.now(), 
+      ...debtForm, 
+      balance: +debtForm.balance, 
+      rate: +debtForm.rate || 0, 
+      minPay: +debtForm.minPay || 0,
+      color: t.color 
+    }]);
+    setAddingDebt(false);
+    setDebtForm({ type: "tarjeta", name: "", balance: "", rate: "", minPay: "" });
+  };
+  
+  const addToGoal = (goalId, amount) => {
+    setGoals(goals.map(g => g.id === goalId ? { ...g, saved: g.saved + amount } : g));
+  };
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={["top"]}>
+      <Section sup="PATRIMONIO" title="Mi Estrategia 📊" />
+      
+      {/* Tabs */}
+      <View style={{ flexDirection: "row", marginHorizontal: 16, marginBottom: 14, backgroundColor: C.card, borderRadius: 14, padding: 4, borderWidth: 1, borderColor: C.border }}>
+        {[["resumen","📊 Resumen"],["metas","🎯 Metas"],["deudas","💳 Deudas"]].map(([id, label]) => (
+          <TouchableOpacity key={id} onPress={() => setView(id)} style={{ flex: 1, paddingVertical: 9, borderRadius: 11, backgroundColor: view === id ? C.mintBg2 : "transparent", alignItems: "center" }}>
+            <Text style={{ fontSize: 12, fontWeight: "700", color: view === id ? C.mint : C.t3 }}>{label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 130 }}>
+        
+        {/* RESUMEN */}
+        {view === "resumen" && (
+          <>
+            {/* Patrimonio Neto */}
+            <Card accent accentColor={netWorth >= 0 ? C.mint : C.rose} style={{ marginBottom: 14 }}>
+              <Text style={{ fontSize: 10, color: C.t3, letterSpacing: 2, marginBottom: 4 }}>PATRIMONIO NETO</Text>
+              <Text style={{ fontSize: 36, fontWeight: "900", color: netWorth >= 0 ? C.mint : C.rose, letterSpacing: -1 }}>
+                {netWorth >= 0 ? "" : "-"}{money(Math.abs(netWorth), cur)}
+              </Text>
+              <View style={{ flexDirection: "row", marginTop: 16, backgroundColor: C.card2, borderRadius: 12, overflow: "hidden" }}>
+                <View style={{ flex: 1, paddingVertical: 12, alignItems: "center", borderRightWidth: 1, borderRightColor: C.border }}>
+                  <Text style={{ fontSize: 14, fontWeight: "800", color: C.mint }}>{money(totalSaved, cur)}</Text>
+                  <Text style={{ fontSize: 10, color: C.t3, marginTop: 2 }}>Ahorrado</Text>
+                </View>
+                <View style={{ flex: 1, paddingVertical: 12, alignItems: "center" }}>
+                  <Text style={{ fontSize: 14, fontWeight: "800", color: C.rose }}>{money(totalDebt, cur)}</Text>
+                  <Text style={{ fontSize: 10, color: C.t3, marginTop: 2 }}>Deudas</Text>
+                </View>
+              </View>
+            </Card>
+            
+            {/* Metas Preview */}
+            <Card style={{ marginBottom: 14 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Metas de Ahorro</Text>
+                <TouchableOpacity onPress={() => setView("metas")}>
+                  <Tag label={goals.length + " activas"} color={C.sky} />
+                </TouchableOpacity>
+              </View>
+              {goals.length === 0 ? (
+                <View style={{ alignItems: "center", paddingVertical: 20 }}>
+                  <Text style={{ fontSize: 32, marginBottom: 8 }}>🎯</Text>
+                  <Text style={{ fontSize: 13, color: C.t3 }}>Sin metas definidas</Text>
+                </View>
+              ) : (
+                goals.slice(0, 3).map((g, i) => {
+                  const pct = Math.min((g.saved / g.target) * 100, 100);
+                  const col = goalColors[i % goalColors.length];
+                  return (
+                    <View key={g.id} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: i < Math.min(goals.length, 3) - 1 ? 12 : 0 }}>
+                      <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: col + "20", alignItems: "center", justifyContent: "center" }}>
+                        <Text style={{ fontSize: 18 }}>{g.emoji}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                          <Text style={{ fontSize: 13, fontWeight: "600", color: C.t1 }}>{g.name}</Text>
+                          <Text style={{ fontSize: 11, fontWeight: "700", color: col }}>{Math.round(pct)}%</Text>
+                        </View>
+                        <Bar pct={pct} color={col} h={5} />
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </Card>
+            
+            {/* Deudas Preview */}
+            <Card style={{ marginBottom: 14, borderColor: totalDebt > 0 ? C.rose + "30" : C.border }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Deudas</Text>
+                <TouchableOpacity onPress={() => setView("deudas")}>
+                  <Tag label={debts.length + " activas"} color={C.rose} />
+                </TouchableOpacity>
+              </View>
+              {debts.length === 0 ? (
+                <View style={{ alignItems: "center", paddingVertical: 20 }}>
+                  <Text style={{ fontSize: 32, marginBottom: 8 }}>🎉</Text>
+                  <Text style={{ fontSize: 13, color: C.mint, fontWeight: "600" }}>Sin deudas</Text>
+                </View>
+              ) : (
+                debts.slice(0, 3).map((d, i) => {
+                  const t = DEBT_TYPES.find(x => x.id === d.type) || DEBT_TYPES[0];
+                  return (
+                    <View key={d.id} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: i < Math.min(debts.length, 3) - 1 ? 12 : 0 }}>
+                      <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: t.color + "20", alignItems: "center", justifyContent: "center" }}>
+                        <Text style={{ fontSize: 18 }}>{t.icon}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 13, fontWeight: "600", color: C.t1 }}>{d.name}</Text>
+                        <Text style={{ fontSize: 11, color: C.t3 }}>{d.rate}% anual</Text>
+                      </View>
+                      <Text style={{ fontSize: 14, fontWeight: "800", color: C.rose }}>{money(d.balance, cur)}</Text>
+                    </View>
+                  );
+                })
+              )}
+            </Card>
+          </>
+        )}
+        
+        {/* METAS */}
+        {view === "metas" && (
+          <>
+            {goals.length === 0 && !addingGoal ? (
+              <Card style={{ alignItems: "center", paddingVertical: 48 }}>
+                <Text style={{ fontSize: 48, marginBottom: 16 }}>🎯</Text>
+                <Text style={{ fontSize: 18, fontWeight: "800", color: C.t1, marginBottom: 6 }}>Sin metas aun</Text>
+                <Text style={{ fontSize: 13, color: C.t3, textAlign: "center", marginBottom: 24 }}>Define tu primer objetivo de ahorro</Text>
+                <Btn label="+ Nueva meta" onPress={() => setAddingGoal(true)} style={{ paddingHorizontal: 24 }} />
+              </Card>
+            ) : (
+              <>
+                {goals.map((g, i) => {
+                  const pct = Math.min((g.saved / g.target) * 100, 100);
+                  const col = goalColors[i % goalColors.length];
+                  const weekly = Math.ceil((g.target - g.saved) / Math.max(g.weeks, 1));
+                  return (
+                    <Card key={g.id} style={{ marginBottom: 12 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                        <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: col + "20", borderWidth: 1, borderColor: col + "40", alignItems: "center", justifyContent: "center" }}>
+                          <Text style={{ fontSize: 26 }}>{g.emoji}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 16, fontWeight: "800", color: C.t1 }}>{g.name}</Text>
+                          <Text style={{ fontSize: 12, color: C.t3 }}>{g.weeks} semanas restantes</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => setGoals(goals.filter(x => x.id !== g.id))} style={{ padding: 8 }}>
+                          <Text style={{ color: C.t4, fontSize: 18 }}>×</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <View style={{ marginBottom: 12 }}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
+                          <Text style={{ fontSize: 12, color: C.t3 }}>{money(g.saved, cur)} de {money(g.target, cur)}</Text>
+                          <Text style={{ fontSize: 12, fontWeight: "700", color: col }}>{Math.round(pct)}%</Text>
+                        </View>
+                        <Bar pct={pct} color={col} h={8} showGlow />
+                      </View>
+                      <View style={{ flexDirection: "row", gap: 10 }}>
+                        <View style={{ flex: 1, backgroundColor: col + "15", borderRadius: 10, padding: 10 }}>
+                          <Text style={{ fontSize: 10, color: C.t3 }}>Ahorro semanal</Text>
+                          <Text style={{ fontSize: 14, fontWeight: "800", color: col }}>{money(weekly, cur)}</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => {
+                          Alert.prompt("Agregar ahorro", `Cuanto agregaste a "${g.name}"?`, [
+                            { text: "Cancelar", style: "cancel" },
+                            { text: "Agregar", onPress: (val) => val && addToGoal(g.id, +val) }
+                          ], "plain-text", "", "numeric");
+                        }} style={{ backgroundColor: col, borderRadius: 10, paddingHorizontal: 16, alignItems: "center", justifyContent: "center" }}>
+                          <Text style={{ color: "#000", fontWeight: "800", fontSize: 13 }}>+ Agregar</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </Card>
+                  );
+                })}
+                
+                {addingGoal ? (
+                  <Card>
+                    <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Nueva meta</Text>
+                    <Input value={goalForm.name} onChange={v => setGoalForm({ ...goalForm, name: v })} placeholder="Nombre (ej: Fondo Emergencia...)" />
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                      <View style={{ flexDirection: "row", gap: 8 }}>
+                        {["🎯", "🏠", "✈️", "🚗", "💻", "📱", "🎓", "💍"].map(e => (
+                          <TouchableOpacity key={e} onPress={() => setGoalForm({ ...goalForm, emoji: e })}
+                            style={{ width: 44, height: 44, borderRadius: 12, borderWidth: 2, borderColor: goalForm.emoji === e ? C.mint : C.border, backgroundColor: goalForm.emoji === e ? C.mintBg : C.card2, alignItems: "center", justifyContent: "center" }}>
+                            <Text style={{ fontSize: 20 }}>{e}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </ScrollView>
+                    <Input value={goalForm.target} onChange={v => setGoalForm({ ...goalForm, target: v })} placeholder={`Meta en ${cur}`} numeric />
+                    <View style={{ flexDirection: "row", gap: 10 }}>
+                      <Btn label="Cancelar" onPress={() => setAddingGoal(false)} ghost style={{ flex: 1 }} />
+                      <Btn label="Crear meta" onPress={addGoal} style={{ flex: 2 }} />
+                    </View>
+                  </Card>
+                ) : (
+                  <View style={{ marginHorizontal: 16 }}>
+                    <Btn label="+ Nueva meta" onPress={() => setAddingGoal(true)} ghost />
+                  </View>
+                )}
+              </>
+            )}
+          </>
+        )}
+        
+        {/* DEUDAS */}
+        {view === "deudas" && (
+          <>
+            {totalDebt > 0 && (
+              <Card style={{ marginBottom: 14, backgroundColor: C.roseBg, borderColor: C.rose + "40" }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                  <View>
+                    <Text style={{ fontSize: 10, color: C.t3, letterSpacing: 1.5, marginBottom: 4 }}>DEUDA TOTAL</Text>
+                    <Text style={{ fontSize: 32, fontWeight: "800", color: C.rose, letterSpacing: -0.5 }}>{money(totalDebt, cur)}</Text>
+                  </View>
+                </View>
+              </Card>
+            )}
+            
+            {debts.length === 0 && !addingDebt ? (
+              <Card style={{ alignItems: "center", paddingVertical: 48 }}>
+                <Text style={{ fontSize: 48, marginBottom: 16 }}>🎉</Text>
+                <Text style={{ fontSize: 18, fontWeight: "800", color: C.t1, marginBottom: 6 }}>Sin deudas</Text>
+                <Text style={{ fontSize: 13, color: C.mint, fontWeight: "600" }}>Excelente senal financiera</Text>
+              </Card>
+            ) : (
+              <>
+                {debts.map(d => {
+                  const t = DEBT_TYPES.find(x => x.id === d.type) || DEBT_TYPES[0];
+                  const mo = payoffMonths(d.balance, d.rate, d.minPay);
+                  const tl = mo === Infinity ? "Solo intereses" : mo > 24 ? (mo / 12).toFixed(1) + " años" : mo + " meses";
+                  return (
+                    <Card key={d.id} style={{ marginBottom: 12, borderLeftWidth: 3, borderLeftColor: t.color }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                        <View style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: t.color + "20", alignItems: "center", justifyContent: "center" }}>
+                          <Text style={{ fontSize: 22 }}>{t.icon}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 15, fontWeight: "800", color: C.t1 }}>{d.name}</Text>
+                          <Tag label={t.label} color={t.color} size="sm" />
+                        </View>
+                        <TouchableOpacity onPress={() => setDebts(debts.filter(x => x.id !== d.id))} style={{ padding: 8 }}>
+                          <Text style={{ color: C.t4, fontSize: 18 }}>×</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <View style={{ flexDirection: "row", backgroundColor: C.card2, borderRadius: 12, overflow: "hidden", marginBottom: 12 }}>
+                        {[["Saldo", money(d.balance, cur), C.rose], ["Tasa", d.rate + "%", C.gold], ["Min/mes", money(d.minPay, cur), C.t1]].map(([l, v, c], i) => (
+                          <View key={l} style={{ flex: 1, paddingVertical: 10, alignItems: "center", borderRightWidth: i < 2 ? 1 : 0, borderRightColor: C.border }}>
+                            <Text style={{ fontSize: 12, fontWeight: "800", color: c }}>{v}</Text>
+                            <Text style={{ fontSize: 10, color: C.t3, marginTop: 2 }}>{l}</Text>
+                          </View>
+                        ))}
+                      </View>
+                      <View style={{ backgroundColor: t.color + "15", borderRadius: 10, padding: 10 }}>
+                        <Text style={{ fontSize: 12, color: C.t2 }}>⏱ Libre en: <Text style={{ color: t.color, fontWeight: "700" }}>{tl}</Text></Text>
+                      </View>
+                    </Card>
+                  );
+                })}
+                
+                {addingDebt ? (
+                  <Card>
+                    <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Nueva deuda</Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+                      {DEBT_TYPES.map(t => (
+                        <TouchableOpacity key={t.id} onPress={() => setDebtForm({ ...debtForm, type: t.id })} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5, borderColor: debtForm.type === t.id ? t.color : C.border, backgroundColor: debtForm.type === t.id ? t.color + "20" : C.card }}>
+                          <Text style={{ fontSize: 12, fontWeight: "700", color: debtForm.type === t.id ? t.color : C.t3 }}>{t.icon} {t.label}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <Input placeholder="Nombre del credito" value={debtForm.name} onChange={v => setDebtForm({ ...debtForm, name: v })} />
+                    <Input placeholder="Saldo actual" value={debtForm.balance} onChange={v => setDebtForm({ ...debtForm, balance: v })} numeric />
+                    <Input placeholder="Tasa anual (%)" value={debtForm.rate} onChange={v => setDebtForm({ ...debtForm, rate: v })} numeric />
+                    <Input placeholder="Pago minimo mensual" value={debtForm.minPay} onChange={v => setDebtForm({ ...debtForm, minPay: v })} numeric />
+                    <View style={{ flexDirection: "row", gap: 10 }}>
+                      <Btn label="Cancelar" onPress={() => setAddingDebt(false)} ghost style={{ flex: 1 }} />
+                      <Btn label="Guardar" onPress={addDebt} style={{ flex: 2 }} />
+                    </View>
+                  </Card>
+                ) : (
+                  <View style={{ marginHorizontal: 16 }}>
+                    <Btn label="+ Agregar deuda" onPress={() => setAddingDebt(true)} ghost />
+                  </View>
+                )}
+              </>
+            )}
+          </>
+        )}
+        
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+// ─────────────────────────────────────────────
+// CHAT IA — Motor completo con acciones
 // ─────────────────────────────────────────────
 const API_KEY = "TU_API_KEY_AQUI"; // ← Reemplaza con tu key de console.anthropic.com
 
-function ChatScreen({ state, addExpense }) {
-  const { user, income, debts, budgets, goals, expenses: allExp } = state;
+function ChatScreen({ state, addExpense, onActivateEmergencyBrake, onAddToGoal }) {
+  const { user, income, debts, budgets, goals, expenses: allExp, emergencyBrakeUntil } = state;
   const cur = user.currency;
   const totalInc = income.reduce((a, i) => a + i.amount, 0);
   const totalExp = allExp.reduce((a, e) => a + e.amount, 0);
   const balance  = totalInc - totalExp;
+  const trafficLight = getTrafficLight(balance, totalInc);
+  const emergencyBrakeActive = isEmergencyBrakeActive(emergencyBrakeUntil);
 
   // Construir contexto financiero completo para la IA
   const buildContext = () => {
@@ -1252,34 +1885,39 @@ function ChatScreen({ state, addExpense }) {
     const runway = calcRunway(balance, allExp);
     const savePct = totalInc > 0 ? Math.round((balance / totalInc) * 100) : 0;
     const debtTotal = debts.reduce((a, d) => a + d.balance, 0);
-    const debtInterestMonth = debts.reduce((a, d) => a + (d.balance * d.rate / 100 / 12), 0);
 
-    return `Eres TARS, el asistente financiero de élite de ${user.name} en República Dominicana.
+    return `Eres TARS, el asistente financiero de elite de ${user.name} en Republica Dominicana.
 Moneda: ${cur}. Fecha actual: ${new Date().toLocaleDateString("es-DO", { weekday:"long", day:"numeric", month:"long" })}.
 
-SITUACIÓN FINANCIERA ACTUAL:
-- Balance disponible: ${money(balance, cur)}
+SITUACION FINANCIERA ACTUAL:
+- Balance disponible: ${money(balance, cur)} (Estado: ${trafficLight.label})
 - Ingresos mensuales: ${money(totalInc, cur)}
 - Gastos del mes: ${money(totalExp, cur)}
 - Tasa de ahorro: ${savePct}%
-- Días de runway (sin ingresos): ${runway ?? "N/A"} días
+- Dias de runway: ${runway ?? "N/A"} dias
 - Deuda total: ${money(debtTotal, cur)}
-- Intereses quemados/mes: ${money(Math.round(debtInterestMonth), cur)}
-- Gastos por categoría: ${JSON.stringify(ct)}
-- Deudas: ${debts.map(d => `${d.name}: ${money(d.balance, cur)} al ${d.rate}%`).join(", ") || "ninguna"}
-- Metas activas: ${goals?.map(g => `${g.emoji}${g.name}: ${Math.round((g.saved/g.target)*100)}%`).join(", ") || "ninguna"}
+- Freno de emergencia: ${emergencyBrakeActive ? "ACTIVO" : "Disponible"}
+- Gastos por categoria: ${JSON.stringify(ct)}
 
 INSTRUCCIONES:
-- Responde SIEMPRE en español dominicano coloquial con emojis estratégicos
-- Máximo 3 párrafos cortos, directos y accionables
-- Si detectas gasto de lujo (>RD$2000 en categoría Ocio/otro), menciona las horas de trabajo que cuesta
-- Si el runway es <30 días, incluye esa advertencia
-- Si hay deudas con tasa >20%, sugiere atacarlas primero
-- Sé brutalmente honesto pero motivador, estilo mentor financiero dominicano
-- Cuando des cifras usa el formato ${cur}X,XXX`;
+- Responde SIEMPRE en español dominicano coloquial con emojis
+- Maximo 3 parrafos cortos, directos y accionables
+- Si el estado es "Alerta" (rojo), sugiere activar el freno de emergencia
+- Si detectas gasto de lujo (>RD$2000 en Ocio/Lujos), menciona las horas de trabajo que cuesta
+- Se brutalmente honesto pero motivador`;
   };
 
-  const WELCOME = `¡Qué lo qué, ${user.name}! 🚀 Soy TARS, tu asesor financiero.\n\nTengo tu situación al día:\n💰 Balance: ${money(balance, cur)}\n📊 Ahorro este mes: ${totalInc > 0 ? Math.round((balance/totalInc)*100) : 0}%\n\nPuedo ayudarte con:\n• "Gasté 800 en gasolina"\n• "¿Cuánto llevo en comida?"\n• "¿Me conviene pagar la tarjeta BHD?"\n• "Analiza mis finanzas"\n• "¿Cuánto me cuesta esta cena de RD$3,500?"`;
+  const WELCOME = `¡Que lo que, ${user.name}! 🚀 Soy TARS, tu asesor financiero.
+
+Tu situacion:
+💰 Balance: ${money(balance, cur)} (${trafficLight.emoji} ${trafficLight.label})
+📊 Ahorro: ${totalInc > 0 ? Math.round((balance/totalInc)*100) : 0}%
+
+Puedo ayudarte con:
+• "Gaste 800 en gasolina"
+• "¿Como voy este mes?"
+• "Activa el freno de emergencia"
+• "Cuanto ahorro si cancelo Netflix?"`;
 
   const [msgs,    setMsgs]    = useState([{ bot: true, text: WELCOME }]);
   const [input,   setInput]   = useState("");
@@ -1295,152 +1933,127 @@ INSTRUCCIONES:
 
     const low = msg.toLowerCase();
 
-    // ── Detección de intenciones locales (sin API) ──
-    const isEntry = /gast[eé]|pagu[eé]|compr[eé]|sali[oó]/.test(low);
-    const parsed  = nlp(msg);
-
-    // Registrar gasto
-    if (isEntry && parsed.amount) {
-      const newE = { id: Date.now(), desc: parsed.desc, amount: parsed.amount, cat: parsed.cat, date: parsed.date };
-      addExpense(newE);
-      const hours = lifeHours(parsed.amount, totalInc);
-      const hoursMsg = hours && hours >= 2 ? `\n⏱ Eso son ${hours} horas de tu trabajo.` : "";
-      const budgetRem = budgets[parsed.cat] ? Math.max(0, budgets[parsed.cat] - ((allExp.filter(e=>e.cat===parsed.cat).reduce((a,e)=>a+e.amount,0)) + parsed.amount)) : null;
-      const budgetMsg = budgetRem !== null ? `\n📊 Te quedan ${money(budgetRem, cur)} en ${parsed.cat} este mes.` : "";
+    // Comandos especiales con acciones
+    if (/freno|emergencia|bloquear|parar/.test(low) && !emergencyBrakeActive) {
+      setMsgs(m => [...m, { 
+        bot: true, 
+        text: "🚨 ¿Quieres activar el Freno de Emergencia?\n\nEsto bloqueara gastos en Ocio, Suscripciones y Lujos por 48 horas.",
+        action: { type: "emergency_brake", label: "🛑 Activar Freno 48h" }
+      }]);
       setLoading(false);
-      setMsgs(m => [...m, { bot: true, text: `✅ Registrado!\n\n${CATS[parsed.cat]?.icon || "💸"} ${parsed.desc}\n${money(parsed.amount, cur)} · ${parsed.cat} · ${parsed.date}${hoursMsg}${budgetMsg}` }]);
       return;
     }
 
-    // Consulta de categoría sin API
-    const catMatch = Object.keys(CATS).find(k => low.includes(k.toLowerCase()));
-    const isQuery  = /cuánto|cuanto|llevo|gast[eé] en|total/.test(low) && catMatch;
-    if (isQuery) {
-      const spent = allExp.filter(e => e.cat === catMatch).reduce((a, e) => a + e.amount, 0);
-      const bud   = budgets[catMatch];
-      const pct   = bud ? Math.round((spent / bud) * 100) : null;
+    // NLP local para gastos
+    const { amount, cat, desc } = nlp(msg);
+    if (amount && (amount > 0 || /gast|pag|compre/.test(low))) {
+      const today = new Date().toISOString().split("T")[0];
+      const expense = { id: Date.now(), desc, amount, cat, date: today };
+      addExpense(expense);
+      
+      const hours = lifeHours(amount, totalInc);
+      const hoursText = hours ? ` Eso son ${hours} horas de tu trabajo 💼.` : "";
+      
+      setMsgs(m => [...m, { 
+        bot: true, 
+        text: `✅ Registrado: ${money(amount, cur)} en ${cat}.${hoursText}\n\nNuevo balance: ${money(balance - amount, cur)}`
+      }]);
       setLoading(false);
-      setMsgs(m => [...m, { bot: true, text: `📊 ${CATS[catMatch]?.icon} **${catMatch}** este mes:\n\n${money(spent, cur)} gastados${bud ? ` de ${money(bud, cur)} (${pct}%)` : ""}\n\n${pct > 90 ? "⚠️ Casi al límite, cuidado." : pct > 70 ? "👀 Vas bien pero vigila." : "✅ Dentro del presupuesto."}` }]);
       return;
     }
 
-    // ── Llamada a la API de Anthropic ──
-    try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": API_KEY,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 600,
-          system: buildContext(),
-          messages: [{ role: "user", content: msg }],
-        }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error.message);
-      setMsgs(m => [...m, { bot: true, text: data.content?.[0]?.text || "No pude responder." }]);
-    } catch (err) {
-      // Fallback inteligente sin API
-      const runway = calcRunway(balance, allExp);
-      const savePct = totalInc > 0 ? Math.round((balance/totalInc)*100) : 0;
-      let fallback = `🤖 TARS sin conexión, pero aquí va:\n\n`;
-      if (/analiza|resumen|cómo estoy|como estoy/.test(low)) {
-        fallback += `💰 Balance: ${money(balance, cur)}\n📈 Ahorro: ${savePct}%\n`;
-        if (runway) fallback += `⏳ Runway: ${runway} días\n`;
-        fallback += savePct >= 20 ? `\n✅ Vas excelente. Mantén ese ritmo.` : `\n⚠️ Tu ahorro está bajo. Revisa gastos de Ocio.`;
-      } else if (/cuánto cuesta|vale la pena|debo comprar/.test(low) && parsed.amount) {
-        const hours = lifeHours(parsed.amount, totalInc);
-        fallback += hours ? `⏱ ${money(parsed.amount, cur)} = ${hours} horas de tu trabajo.\n¿Vale ${hours} horas de tu vida?` : `Agrega tu API key en App.js para respuestas completas.`;
-      } else {
-        fallback += `Para respuestas de IA completas, agrega tu API key de console.anthropic.com en la línea "const API_KEY".`;
-      }
-      setMsgs(m => [...m, { bot: true, text: fallback }]);
+    // Sugerencias de ahorro
+    if (goals.length > 0 && /ahorra|mover|transferir/.test(low)) {
+      const goal = goals[0];
+      setMsgs(m => [...m, { 
+        bot: true, 
+        text: `💰 ¿Quieres agregar dinero a tu meta "${goal.emoji} ${goal.name}"?\n\nProgreso actual: ${Math.round((goal.saved / goal.target) * 100)}%`,
+        action: { type: "add_saving", goalId: goal.id, label: `+ Agregar a ${goal.name}` }
+      }]);
+      setLoading(false);
+      return;
     }
+
+    // Respuesta generica mejorada
+    const responses = [
+      `📊 Tu balance esta en ${trafficLight.label}. ${trafficLight.status === "red" ? "Te recomiendo activar el freno de emergencia." : "Vas bien, sigue asi!"}`,
+      `💡 Este mes llevas ${money(totalExp, cur)} gastados. ${totalInc > 0 && (totalExp / totalInc) > 0.8 ? "Cuidado, estas gastando mas del 80% de tus ingresos." : "Mantente dentro del presupuesto."}`,
+      `🎯 ${goals.length > 0 ? `Tienes ${goals.length} metas activas. La mas cercana es "${goals[0]?.name}" al ${Math.round((goals[0]?.saved / goals[0]?.target) * 100)}%.` : "Considera crear una meta de ahorro para mantenerte motivado."}`,
+    ];
+    
+    setMsgs(m => [...m, { bot: true, text: responses[Math.floor(Math.random() * responses.length)] }]);
     setLoading(false);
+  };
+
+  // Ejecutar accion desde el chat
+  const executeAction = (action) => {
+    if (action.type === "emergency_brake") {
+      onActivateEmergencyBrake();
+      setMsgs(m => [...m, { bot: true, text: "✅ Freno de emergencia activado por 48 horas. Las categorias de Ocio, Suscripciones y Lujos estan bloqueadas." }]);
+    } else if (action.type === "add_saving") {
+      Alert.prompt("Agregar ahorro", "¿Cuanto quieres agregar?", [
+        { text: "Cancelar", style: "cancel" },
+        { text: "Agregar", onPress: (val) => {
+          if (val && +val > 0) {
+            onAddToGoal(action.goalId, +val);
+            setMsgs(m => [...m, { bot: true, text: `✅ Agregaste ${money(+val, cur)} a tu meta!` }]);
+          }
+        }}
+      ], "plain-text", "", "numeric");
+    }
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={["top"]}>
-      {/* Header */}
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 18, paddingTop: 12, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: C.border }}>
-        <View>
-          <Text style={{ fontSize: 10, color: C.t3, letterSpacing: 2, fontWeight: "700" }}>ASISTENTE</Text>
-          <Text style={{ fontSize: 20, fontWeight: "900", color: C.t1, letterSpacing: -0.5 }}>TARS <Text style={{ color: C.mint }}>IA</Text> 🤖</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: C.border }}>
+        <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: C.mintBg2, borderWidth: 1, borderColor: C.mint + "50", alignItems: "center", justifyContent: "center" }}>
+          <Text style={{ fontSize: 24 }}>🤖</Text>
         </View>
-        <View style={{ backgroundColor: C.mintBg2, borderRadius: 10, borderWidth: 1, borderColor: C.mint + "40", paddingHorizontal: 10, paddingVertical: 5 }}>
-          <Text style={{ fontSize: 11, fontWeight: "700", color: C.mint }}>{money(balance, cur)}</Text>
-          <Text style={{ fontSize: 9, color: C.t3, textAlign: "center" }}>disponible</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 16, fontWeight: "800", color: C.t1 }}>TARS</Text>
+          <Text style={{ fontSize: 11, color: C.mint }}>Tu asesor financiero IA</Text>
+        </View>
+        <View style={{ backgroundColor: trafficLight.color + "20", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}>
+          <Text style={{ fontSize: 11, color: trafficLight.color, fontWeight: "700" }}>{trafficLight.emoji} {trafficLight.label}</Text>
         </View>
       </View>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={90}>
-        <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
-          showsVerticalScrollIndicator={false}
-          onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}>
-          {msgs.map((m, i) => (
-            <View key={i} style={{ marginBottom: 12, alignItems: m.bot ? "flex-start" : "flex-end" }}>
-              {m.bot && (
-                <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
-                  <View style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: C.mintBg2, borderWidth: 1, borderColor: C.mint + "40", alignItems: "center", justifyContent: "center", marginBottom: 2 }}>
-                    <Text style={{ fontSize: 14 }}>🤖</Text>
-                  </View>
-                  <View style={{ maxWidth: "80%", padding: 13, borderRadius: 18, borderBottomLeftRadius: 4,
-                    backgroundColor: C.card, borderWidth: 1, borderColor: C.border2 }}>
-                    <Text style={{ fontSize: 13, color: C.t1, lineHeight: 21 }}>{m.text}</Text>
-                  </View>
-                </View>
-              )}
-              {!m.bot && (
-                <View style={{ maxWidth: "80%", padding: 13, borderRadius: 18, borderBottomRightRadius: 4,
-                  backgroundColor: C.mint }}>
-                  <Text style={{ fontSize: 13, color: "#000", lineHeight: 21, fontWeight: "600" }}>{m.text}</Text>
-                </View>
+      <ScrollView
+        ref={scroll}
+        contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
+        onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
+      >
+        {msgs.map((m, i) => (
+          <View key={i} style={{ marginBottom: 12 }}>
+            <View style={{ alignSelf: m.bot ? "flex-start" : "flex-end", maxWidth: "85%",
+              backgroundColor: m.bot ? C.card : C.mint, borderRadius: 18, padding: 14,
+              borderWidth: 1, borderColor: m.bot ? C.border : C.mint,
+              borderBottomLeftRadius: m.bot ? 4 : 18, borderBottomRightRadius: m.bot ? 18 : 4 }}>
+              <Text style={{ fontSize: 14, color: m.bot ? C.t1 : "#000", lineHeight: 20 }}>{m.text}</Text>
+              
+              {/* Boton de accion */}
+              {m.action && (
+                <TouchableOpacity 
+                  onPress={() => executeAction(m.action)} 
+                  style={{ marginTop: 12, backgroundColor: m.action.type === "emergency_brake" ? C.rose : C.mint, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14, alignItems: "center" }}>
+                  <Text style={{ color: "#fff", fontWeight: "800", fontSize: 13 }}>{m.action.label}</Text>
+                </TouchableOpacity>
               )}
             </View>
-          ))}
-          {loading && (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
-              <View style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: C.mintBg2, alignItems: "center", justifyContent: "center" }}>
-                <Text style={{ fontSize: 14 }}>🤖</Text>
-              </View>
-              <View style={{ backgroundColor: C.card, borderRadius: 14, borderWidth: 1, borderColor: C.border2, padding: 12, flexDirection: "row", gap: 4 }}>
-                {[0, 1, 2].map(j => <View key={j} style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: C.mint, opacity: 0.6 }} />)}
-              </View>
-            </View>
-          )}
-        </ScrollView>
-
-        {/* Sugerencias rápidas */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 14, paddingBottom: 6, maxHeight: 44 }}>
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            {["Analiza mis finanzas", "¿Cuánto llevo en comida?", "Consejo para ahorrar", "¿Cómo están mis deudas?"].map(s => (
-              <TouchableOpacity key={s} onPress={() => { setInput(s); }}
-                style={{ paddingHorizontal: 12, paddingVertical: 7, backgroundColor: C.card2, borderRadius: 10, borderWidth: 1, borderColor: C.border2 }}>
-                <Text style={{ fontSize: 11, color: C.t2, fontWeight: "600" }}>{s}</Text>
-              </TouchableOpacity>
-            ))}
           </View>
-        </ScrollView>
+        ))}
+        {loading && (
+          <View style={{ alignSelf: "flex-start", backgroundColor: C.card, borderRadius: 18, padding: 14, borderWidth: 1, borderColor: C.border }}>
+            <ActivityIndicator size="small" color={C.mint} />
+          </View>
+        )}
+      </ScrollView>
 
-        <View style={{ flexDirection: "row", gap: 10, padding: 14, paddingBottom: 20, backgroundColor: C.bg, borderTopWidth: 1, borderTopColor: C.border }}>
-          <TextInput
-            style={[styles.input, { flex: 1, marginBottom: 0 }]}
-            placeholder="Escribe un gasto o pregunta a TARS..."
-            placeholderTextColor={C.t3}
-            value={input} onChangeText={setInput}
-            onSubmitEditing={send} returnKeyType="send"
-            multiline maxHeight={100}
-          />
-          <TouchableOpacity onPress={send}
-            style={{ width: 48, height: 48, backgroundColor: loading ? C.t4 : C.mint, borderRadius: 14,
-              alignItems: "center", justifyContent: "center",
-              shadowColor: C.mint, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.4, shadowRadius: 8 }}
-            activeOpacity={0.8} disabled={loading}>
-            <Text style={{ fontSize: 20, color: "#000", fontWeight: "900" }}>↑</Text>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={90}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 16, paddingBottom: 24, backgroundColor: C.card, borderTopWidth: 1, borderTopColor: C.border }}>
+          <Input value={input} onChange={setInput} placeholder="Escribe algo..." style={{ flex: 1, marginBottom: 0 }} />
+          <TouchableOpacity onPress={send} disabled={loading} style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: C.mint, alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ fontSize: 20, color: "#000" }}>➤</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -1449,921 +2062,8 @@ INSTRUCCIONES:
 }
 
 // ─────────────────────────────────────────────
-// DEUDAS
+// SETTINGS MODAL
 // ─────────────────────────────────────────────
-function DeudasScreen({ state, setDebts }) {
-  const { user, debts } = state;
-  const cur = user.currency;
-  const [view,   setView]   = useState("lista");
-  const [method, setMethod] = useState("avalanche");
-  const [extra,  setExtra]  = useState("2000");
-  const [adding, setAdding] = useState(false);
-  const [form,   setForm]   = useState({ type: "tarjeta", name: "", balance: "", rate: "", minPay: "", limit: "" });
-
-  const TYPES = [
-    { id: "tarjeta",  icon: "💳", label: "Tarjeta",  color: C.rose   },
-    { id: "prestamo", icon: "🏦", label: "Prestamo", color: C.gold   },
-    { id: "hipoteca", icon: "🏠", label: "Hipoteca", color: C.sky    },
-    { id: "auto",     icon: "🚗", label: "Auto",     color: C.violet },
-    { id: "informal", icon: "🤝", label: "Informal", color: C.green  },
-    { id: "otro",     icon: "📋", label: "Otro",     color: C.t3     },
-  ];
-
-  const totalDebt = debts.reduce((a, d) => a + d.balance, 0);
-  const totalMin  = debts.reduce((a, d) => a + d.minPay, 0);
-  const sorted    = [...debts].sort((a, b) => method === "avalanche" ? b.rate - a.rate : a.balance - b.balance);
-
-  const addDebt = () => {
-    if (!form.name || !form.balance) return;
-    const t = TYPES.find(x => x.id === form.type) || TYPES[5];
-    setDebts([...debts, { id: Date.now(), ...form, balance: +form.balance, rate: +form.rate || 0, minPay: +form.minPay || 0, limit: +(form.limit || form.balance), color: t.color }]);
-    setAdding(false);
-    setForm({ type: "tarjeta", name: "", balance: "", rate: "", minPay: "", limit: "" });
-  };
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={["top"]}>
-      <Section sup="GESTION" title="Mis Deudas 💳" />
-      <View style={{ flexDirection: "row", marginHorizontal: 16, marginBottom: 12, backgroundColor: C.card, borderRadius: 14, padding: 4, borderWidth: 1, borderColor: C.border }}>
-        {[["lista","📋 Lista"],["estrategia","🏆 Estrategia"]].map(([id, label]) => (
-          <TouchableOpacity key={id} onPress={() => setView(id)} style={{ flex: 1, paddingVertical: 9, borderRadius: 11, backgroundColor: view === id ? C.card2 : "transparent", alignItems: "center" }}>
-            <Text style={{ fontSize: 13, fontWeight: "700", color: view === id ? C.t1 : C.t3 }}>{label}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
-        {debts.length > 0 && (
-          <View style={[styles.card, { marginBottom: 14, backgroundColor: C.roseBg, borderColor: C.rose + "40" }]}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <View><Text style={{ fontSize: 10, color: C.t3, letterSpacing: 1.5, marginBottom: 4 }}>DEUDA TOTAL</Text><Text style={{ fontSize: 32, fontWeight: "800", color: C.rose, letterSpacing: -0.5 }}>{money(totalDebt, cur)}</Text></View>
-              <View style={{ alignItems: "flex-end" }}><Text style={{ fontSize: 10, color: C.t3, letterSpacing: 1, marginBottom: 4 }}>PAGO MINIMO/MES</Text><Text style={{ fontSize: 20, fontWeight: "700", color: C.gold }}>{money(totalMin, cur)}</Text></View>
-            </View>
-          </View>
-        )}
-        {view === "lista" && (
-          <>
-            {debts.length === 0 && !adding && (
-              <Card style={{ alignItems: "center", paddingVertical: 36 }}>
-                <Text style={{ fontSize: 44, marginBottom: 14 }}>🎉</Text>
-                <Text style={{ fontSize: 16, fontWeight: "700", color: C.t1, marginBottom: 6 }}>Sin deudas registradas</Text>
-                <Text style={{ fontSize: 13, color: C.t3, textAlign: "center" }}>Excelente senal financiera!</Text>
-              </Card>
-            )}
-            {debts.map(d => {
-              const t = TYPES.find(x => x.id === d.type) || TYPES[5];
-              const dc = d.color || t.color;
-              const pctPaid = d.limit > 0 ? Math.round(((d.limit - d.balance) / d.limit) * 100) : 0;
-              const mo = payoffMonths(d.balance, d.rate, d.minPay + Number(extra || 0));
-              const tl = mo === Infinity ? "Solo intereses" : mo > 24 ? (mo / 12).toFixed(1) + " años" : mo + " meses";
-              return (
-                <View key={d.id} style={{ marginHorizontal: 16, marginBottom: 14, borderRadius: 22, overflow: "hidden", borderWidth: 1, borderColor: dc + "45",
-                  shadowColor: dc, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 12 }}>
-                  <View style={{ backgroundColor: dc + "0C", padding: 16 }}>
-                    {/* Top row */}
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                        <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: dc + "22", borderWidth: 1.5, borderColor: dc + "40", alignItems: "center", justifyContent: "center" }}>
-                          <Text style={{ fontSize: 20 }}>{t.icon}</Text>
-                        </View>
-                        <View>
-                          <Text style={{ fontSize: 15, fontWeight: "800", color: C.t1 }}>{d.name}</Text>
-                          <Tag label={t.label} color={dc} size="sm" />
-                        </View>
-                      </View>
-                      <TouchableOpacity onPress={() => setDebts(debts.filter(x => x.id !== d.id))} style={{ padding: 6, borderRadius: 10, backgroundColor: C.roseBg }}>
-                        <Text style={{ color: C.rose, fontSize: 16, fontWeight: "700" }}>×</Text>
-                      </TouchableOpacity>
-                    </View>
-                    {/* Stats */}
-                    <View style={{ flexDirection: "row", gap: 0, marginBottom: 12, backgroundColor: C.bg + "80", borderRadius: 14, overflow: "hidden" }}>
-                      {[["Saldo", money(d.balance, cur), C.rose], ["Tasa", d.rate + "% anual", C.gold], ["Mín/mes", money(d.minPay, cur), C.t1]].map(([l, v, c], i) => (
-                        <View key={l} style={{ flex: 1, paddingVertical: 10, alignItems: "center", borderRightWidth: i < 2 ? 1 : 0, borderRightColor: C.border2 }}>
-                          <Text style={{ fontSize: 12, fontWeight: "800", color: c }}>{v}</Text>
-                          <Text style={{ fontSize: 10, color: C.t3, marginTop: 2 }}>{l}</Text>
-                        </View>
-                      ))}
-                    </View>
-                    {/* Progress paid */}
-                    {d.limit > 0 && (
-                      <View style={{ marginBottom: 10 }}>
-                        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
-                          <Text style={{ fontSize: 11, color: C.t3 }}>Progreso de pago</Text>
-                          <Text style={{ fontSize: 11, color: dc, fontWeight: "700" }}>{pctPaid}% pagado</Text>
-                        </View>
-                        <Bar pct={pctPaid} color={dc} h={6} showGlow />
-                      </View>
-                    )}
-                    <View style={{ backgroundColor: dc + "14", borderRadius: 12, padding: 10, borderWidth: 1, borderColor: dc + "25", flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                      <Text style={{ fontSize: 12, color: C.t2 }}>⏱ Libre en: <Text style={{ color: dc, fontWeight: "700" }}>{tl}</Text></Text>
-                      {d.rate > 0 && <Text style={{ fontSize: 11, color: C.t3 }}><Text style={{ color: C.rose, fontWeight: "700" }}>{money(Math.round(d.balance * d.rate / 100), cur)}</Text>/año</Text>}
-                    </View>
-                  </View>
-                </View>
-              );
-            })}
-            {adding ? (
-              <Card>
-                <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Nueva deuda</Text>
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-                  {TYPES.map(t => (
-                    <TouchableOpacity key={t.id} onPress={() => setForm({ ...form, type: t.id })} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5, borderColor: form.type === t.id ? t.color : C.border, backgroundColor: form.type === t.id ? t.color + "20" : C.card }}>
-                      <Text style={{ fontSize: 12, fontWeight: "700", color: form.type === t.id ? t.color : C.t3 }}>{t.icon} {t.label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                {[["name","Nombre del credito","default"],["balance","Saldo actual","numeric"],["limit","Limite o monto original","numeric"],["rate","Tasa anual (%)","numeric"],["minPay","Pago minimo mensual","numeric"]].map(([k, ph, kb]) => (
-                  <Input key={k} placeholder={ph} value={form[k]} onChange={v => setForm({ ...form, [k]: v })} numeric={kb === "numeric"} />
-                ))}
-                <View style={{ flexDirection: "row", gap: 10, marginTop: 4 }}>
-                  <Btn label="Cancelar" onPress={() => setAdding(false)} ghost style={{ flex: 1 }} />
-                  <Btn label="Guardar deuda" onPress={addDebt} style={{ flex: 2 }} />
-                </View>
-              </Card>
-            ) : (
-              <View style={{ marginHorizontal: 16 }}><Btn label="+ Agregar deuda" onPress={() => setAdding(true)} ghost /></View>
-            )}
-          </>
-        )}
-        {view === "estrategia" && (
-          <>
-            <View style={{ flexDirection: "row", gap: 10, marginHorizontal: 16, marginBottom: 12 }}>
-              {[["avalanche","🏔 Avalanche","Mayor tasa primero"],["snowball","⛄ Snowball","Menor saldo primero"]].map(([id, label, sub]) => (
-                <TouchableOpacity key={id} onPress={() => setMethod(id)} style={{ flex: 1, backgroundColor: method === id ? C.mint : C.card, borderRadius: 14, borderWidth: 1, borderColor: method === id ? C.mint : C.border, padding: 12, alignItems: "center" }}>
-                  <Text style={{ fontSize: 13, fontWeight: "700", color: method === id ? "#000" : C.t1 }}>{label}</Text>
-                  <Text style={{ fontSize: 10, color: method === id ? "#00000080" : C.t3, marginTop: 2 }}>{sub}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <Card style={{ marginBottom: 12 }}>
-              <Text style={{ fontSize: 12, fontWeight: "700", color: C.t1, marginBottom: 8 }}>Abono extra mensual</Text>
-              <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
-                <Input placeholder={cur} value={extra} onChange={setExtra} numeric style={{ flex: 1, marginBottom: 0 }} />
-                <Text style={{ fontSize: 12, color: C.mint, fontWeight: "700" }}>{cur}/mes</Text>
-              </View>
-            </Card>
-            {sorted.map((d, i) => {
-              const payment = d.minPay + (i === 0 ? +extra : 0);
-              const mo = payoffMonths(d.balance, d.rate, payment);
-              const tl = mo === Infinity ? "Solo intereses" : mo > 24 ? (mo / 12).toFixed(1) + " años" : mo + " meses";
-              const t = TYPES.find(x => x.id === d.type) || TYPES[5];
-              return (
-                <Card key={d.id} style={{ marginBottom: 12, borderLeftWidth: 3, borderLeftColor: d.color || t.color }}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                      <View style={{ width: 28, height: 28, borderRadius: 8, backgroundColor: i === 0 ? C.mint : C.card2, alignItems: "center", justifyContent: "center" }}><Text style={{ fontSize: 13, fontWeight: "800", color: i === 0 ? "#000" : C.t3 }}>{i + 1}</Text></View>
-                      <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>{d.name}</Text>
-                    </View>
-                    {i === 0 && <Tag label="🎯 Atacar primero" color={C.mint} />}
-                  </View>
-                  <View style={{ flexDirection: "row", gap: 0, marginBottom: 12 }}>
-                    {[["Saldo", money(d.balance, cur), C.rose], ["Tasa", d.rate + "%", C.gold], ["Pago", money(payment, cur), C.t1]].map(([l, v, c], idx) => (
-                      <View key={l} style={{ flex: 1, borderRightWidth: idx < 2 ? 1 : 0, borderRightColor: C.border, paddingRight: idx < 2 ? 12 : 0, paddingLeft: idx > 0 ? 12 : 0 }}>
-                        <Text style={{ fontSize: 10, color: C.t3, marginBottom: 3 }}>{l}</Text>
-                        <Text style={{ fontSize: 13, fontWeight: "700", color: c }}>{v}</Text>
-                      </View>
-                    ))}
-                  </View>
-                  <View style={{ backgroundColor: C.card2, borderRadius: 10, padding: 10 }}>
-                    <Text style={{ fontSize: 12, color: C.t2 }}>Libre en: <Text style={{ color: C.mint, fontWeight: "700" }}>{tl}</Text></Text>
-                  </View>
-                </Card>
-              );
-            })}
-          </>
-        )}
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
-// ─────────────────────────────────────────────
-// METAS
-// ─────────────────────────────────────────────
-function MetasScreen({ state, setGoals }) {
-  const { user, goals, income } = state;
-  const cur = user.currency;
-  const totalInc = income.reduce((a, i) => a + i.amount, 0);
-  const [adding,   setAdding]   = useState(false);
-  const [selected, setSelected] = useState(0); // índice de meta activa
-  const [form,     setForm]     = useState({ name: "", emoji: "🎯", target: "", weeks: "12" });
-
-  const goalColors = [C.sky, C.mint, C.violet, C.gold, C.orange, C.pink];
-
-  // Meta activa seleccionada
-  const active = goals.length > 0 ? goals[selected] || goals[0] : null;
-  const activePct = active ? Math.min((active.saved / active.target) * 100, 100) : 0;
-  const activeColor = goalColors[selected % goalColors.length];
-
-  // Progreso circular con CSS trick (no SVG)
-  function CircularProgress({ pct, size, color, children }) {
-    const deg = Math.round((pct / 100) * 360);
-    const r = size / 2;
-    return (
-      <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
-        {/* Anillo de fondo */}
-        <View style={{ position: "absolute", width: size, height: size, borderRadius: r,
-          borderWidth: 10, borderColor: C.border2 }} />
-        {/* Cuadrante 1 (0-90) */}
-        {deg > 0 && (
-          <View style={{ position: "absolute", width: size, height: size, borderRadius: r,
-            borderWidth: 10, borderColor: "transparent",
-            borderTopColor: deg >= 0 ? color : "transparent",
-            borderRightColor: deg >= 90 ? color : "transparent",
-            borderBottomColor: deg >= 180 ? color : "transparent",
-            borderLeftColor: deg >= 270 ? color : "transparent",
-            transform: [{ rotate: "-90deg" }] }} />
-        )}
-        <View style={{ alignItems: "center", justifyContent: "center" }}>{children}</View>
-      </View>
-    );
-  }
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={["top"]}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 130 }}>
-
-        {/* Header estilo boceto 2 */}
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 18, paddingTop: 14, paddingBottom: 6 }}>
-          <Text style={{ fontSize: 20, fontWeight: "900", color: C.t1, letterSpacing: -0.5 }}>Progreso de Ahorro</Text>
-          <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border2, alignItems: "center", justifyContent: "center" }}>
-            <Text style={{ fontSize: 18 }}>⚙️</Text>
-          </View>
-        </View>
-
-        {goals.length === 0 ? (
-          <View style={{ alignItems: "center", paddingVertical: 60, paddingHorizontal: 32 }}>
-            <View style={{ width: 120, height: 120, borderRadius: 60, borderWidth: 10, borderColor: C.border2,
-              alignItems: "center", justifyContent: "center", marginBottom: 24 }}>
-              <Text style={{ fontSize: 40 }}>🎯</Text>
-            </View>
-            <Text style={{ fontSize: 18, fontWeight: "800", color: C.t1, textAlign: "center", marginBottom: 8 }}>Sin metas aún</Text>
-            <Text style={{ fontSize: 13, color: C.t3, textAlign: "center", lineHeight: 20, marginBottom: 28 }}>Define tu primer objetivo y mira tu progreso visual día a día</Text>
-            <TouchableOpacity onPress={() => setAdding(true)} style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: C.mint,
-              alignItems: "center", justifyContent: "center",
-              shadowColor: C.mint, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14 }}>
-              <Text style={{ fontSize: 32, color: "#000", fontWeight: "900" }}>+</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <>
-            {/* Hero circular — meta activa */}
-            <View style={{ alignItems: "center", paddingVertical: 28 }}>
-              <CircularProgress pct={activePct} size={220} color={activeColor}>
-                <Text style={{ fontSize: 36, marginBottom: 4 }}>{active.emoji}</Text>
-                <Text style={{ fontSize: 40, fontWeight: "900", color: activeColor, letterSpacing: -2 }}>{Math.round(activePct)}%</Text>
-                <Text style={{ fontSize: 12, color: C.t3, letterSpacing: 0.5 }}>Progreso</Text>
-                <Text style={{ fontSize: 14, fontWeight: "700", color: C.t2, marginTop: 4 }}>{active.name}</Text>
-              </CircularProgress>
-              <View style={{ marginTop: 16, alignItems: "center" }}>
-                <Text style={{ fontSize: 22, fontWeight: "900", color: C.t1 }}>{money(active.saved, cur)}</Text>
-                <Text style={{ fontSize: 12, color: C.t3 }}>de {money(active.target, cur)}</Text>
-              </View>
-            </View>
-
-            {/* Chips de selección de meta */}
-            {goals.length > 1 && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, marginBottom: 14 }}>
-                <View style={{ flexDirection: "row", gap: 8 }}>
-                  {goals.map((g, i) => {
-                    const pct = Math.min((g.saved / g.target) * 100, 100);
-                    const col = goalColors[i % goalColors.length];
-                    return (
-                      <TouchableOpacity key={g.id} onPress={() => setSelected(i)}
-                        style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, borderWidth: 1.5,
-                          borderColor: selected === i ? col : C.border, backgroundColor: selected === i ? col + "20" : C.card2,
-                          alignItems: "center", minWidth: 90 }}>
-                        <Text style={{ fontSize: 18, marginBottom: 3 }}>{g.emoji}</Text>
-                        <Text style={{ fontSize: 11, fontWeight: "700", color: selected === i ? col : C.t3 }} numberOfLines={1}>{g.name}</Text>
-                        <Text style={{ fontSize: 10, color: C.t3, marginTop: 2 }}>{Math.round(pct)}%</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </ScrollView>
-            )}
-
-            {/* Lista de metas con mini barras */}
-            <View style={{ paddingHorizontal: 16, marginBottom: 14 }}>
-              <Text style={{ fontSize: 13, fontWeight: "700", color: C.t2, marginBottom: 12, letterSpacing: 0.5 }}>TODAS LAS METAS</Text>
-              {goals.map((g, i) => {
-                const pct  = Math.min((g.saved / g.target) * 100, 100);
-                const col  = goalColors[i % goalColors.length];
-                const weekly = ((g.target - g.saved) / Math.max(g.weeks, 1)).toFixed(0);
-                return (
-                  <View key={g.id} style={{ backgroundColor: C.card, borderRadius: 18, borderWidth: 1,
-                    borderColor: selected === i ? col + "50" : C.border, padding: 16, marginBottom: 10 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 }}>
-                      <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: col + "20",
-                        borderWidth: 1.5, borderColor: col + "40", alignItems: "center", justifyContent: "center" }}>
-                        <Text style={{ fontSize: 22 }}>{g.emoji}</Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 14, fontWeight: "800", color: C.t1 }}>{g.name}</Text>
-                        <Text style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{money(g.saved, cur)} de {money(g.target, cur)}</Text>
-                      </View>
-                      <View style={{ alignItems: "flex-end", gap: 4 }}>
-                        <View style={{ backgroundColor: col + "22", borderRadius: 8, borderWidth: 1, borderColor: col + "40", paddingHorizontal: 8, paddingVertical: 3 }}>
-                          <Text style={{ fontSize: 12, fontWeight: "900", color: col }}>{Math.round(pct)}%</Text>
-                        </View>
-                        <TouchableOpacity onPress={() => setGoals(goals.filter(x => x.id !== g.id))}>
-                          <Text style={{ fontSize: 10, color: C.t4 }}>eliminar</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                    <Bar pct={pct} color={col} h={7} showGlow />
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 8 }}>
-                      <Text style={{ fontSize: 10, color: C.t3 }}>Aparta {money(+weekly, cur)}/semana</Text>
-                      <Text style={{ fontSize: 10, color: col, fontWeight: "700" }}>Faltan {money(g.target - g.saved, cur)}</Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-
-            {/* Inversiones del mes — rendimiento basado en ahorro */}
-            {totalInc > 0 && (
-              <Card style={{ marginBottom: 14 }}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Inversiones del Mes</Text>
-                  <Tag label={"+4.5%"} color={C.mint} />
-                </View>
-                {(() => {
-                  const monthly = Math.round(totalInc * 0.1);
-                  const weeks   = [0.8, 1.2, 0.6, 1.4, 1.0].slice(0, Math.ceil(DAY / 7));
-                  const maxW    = Math.max(...weeks);
-                  return (
-                    <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, height: 70 }}>
-                      {weeks.map((w, i) => (
-                        <View key={i} style={{ flex: 1, alignItems: "center", justifyContent: "flex-end", height: 70 }}>
-                          <View style={{ width: "100%", height: Math.max((w / maxW) * 55, 8), borderRadius: 6,
-                            backgroundColor: i === weeks.length - 1 ? C.mint : C.sky,
-                            shadowColor: i === weeks.length - 1 ? C.mint : C.sky,
-                            shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.5, shadowRadius: 6 }} />
-                          <Text style={{ fontSize: 8, color: C.t3, marginTop: 4 }}>S{i + 1}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  );
-                })()}
-              </Card>
-            )}
-          </>
-        )}
-
-        {/* Form nueva meta */}
-        {adding && (
-          <Card style={{ marginHorizontal: 16 }}>
-            <Text style={{ fontSize: 16, fontWeight: "800", color: C.t1, marginBottom: 16 }}>Nueva meta 🎯</Text>
-            <Text style={styles.lbl}>QUÉ QUIERES LOGRAR?</Text>
-            <Input value={form.name} onChange={v => setForm({ ...form, name: v })} placeholder="ej: Laptop, Viaje, Fondo de emergencia..." />
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.lbl}>EMOJI</Text>
-                <Input value={form.emoji} onChange={v => setForm({ ...form, emoji: v })} style={{ textAlign: "center", fontSize: 26 }} />
-              </View>
-              <View style={{ flex: 2.5 }}>
-                <Text style={styles.lbl}>CUÁNTO CUESTA ({cur})</Text>
-                <Input value={form.target} onChange={v => setForm({ ...form, target: v })} placeholder="ej: 50000" numeric />
-              </View>
-            </View>
-            <Text style={styles.lbl}>PLAZO</Text>
-            <View style={{ flexDirection: "row", gap: 8, marginTop: 8, marginBottom: 14 }}>
-              {[["4","1 mes"],["12","3 meses"],["24","6 meses"],["52","1 año"]].map(([w, l]) => (
-                <TouchableOpacity key={w} onPress={() => setForm({ ...form, weeks: w })}
-                  style={{ flex: 1, paddingVertical: 11, borderRadius: 12, borderWidth: 1.5, alignItems: "center",
-                    borderColor: form.weeks === w ? C.mint : C.border, backgroundColor: form.weeks === w ? C.mintBg : C.card }}>
-                  <Text style={{ fontSize: 11, fontWeight: "700", color: form.weeks === w ? C.mint : C.t3 }}>{l}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            {!!form.name && !!form.target && (
-              <View style={{ backgroundColor: C.mintBg2, borderRadius: 12, borderWidth: 1, borderColor: C.mint + "40", padding: 12, marginBottom: 14 }}>
-                <Text style={{ fontSize: 12, color: C.t2 }}>Aparta <Text style={{ color: C.mint, fontWeight: "700" }}>{cur}{Math.ceil(+form.target / +form.weeks).toLocaleString()}/semana</Text> durante {form.weeks} semanas.</Text>
-              </View>
-            )}
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <Btn label="Atrás" onPress={() => setAdding(false)} ghost style={{ flex: 1 }} />
-              <Btn label="¡Empezar! 🚀" onPress={() => {
-                if (!form.name || !form.target) return;
-                setGoals([...goals, { id: Date.now(), ...form, target: +form.target, saved: 0, weeks: +form.weeks }]);
-                setAdding(false);
-                setForm({ name: "", emoji: "🎯", target: "", weeks: "12" });
-              }} style={{ flex: 2 }} />
-            </View>
-          </Card>
-        )}
-
-      </ScrollView>
-
-      {/* FAB añadir meta — solo si no está añadiendo */}
-      {!adding && (
-        <View style={{ position: "absolute", bottom: 88, alignSelf: "center",
-          shadowColor: C.mint, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14 }}>
-          <TouchableOpacity onPress={() => setAdding(true)}
-            style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: C.mint,
-              borderRadius: 20, paddingHorizontal: 24, paddingVertical: 14 }}>
-            <Text style={{ fontSize: 20, color: "#000", fontWeight: "900" }}>+</Text>
-            <Text style={{ fontSize: 14, fontWeight: "800", color: "#000" }}>Añadir ahorro</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-    </SafeAreaView>
-  );
-}
-
-// ─────────────────────────────────────────────
-// HERRAMIENTAS (Score + Predictor + Recordatorios)
-// ─────────────────────────────────────────────
-function HerramientasScreen({ state, setReminders }) {
-  const { user, expenses, income, budgets, reminders, streakDays, goals } = state;
-  const cur = user.currency;
-  const [sub, setSub] = useState("score");
-  const totalInc = income.reduce((a, i) => a + i.amount, 0);
-  const totalExp = expenses.reduce((a, e) => a + e.amount, 0);
-  const { total, s, grade } = score(expenses, totalInc, budgets);
-  const savePct = totalInc > 0 ? Math.round(((totalInc - totalExp) / totalInc) * 100) : 0;
-  const dailyAvg  = totalExp / Math.max(DAY, 1);
-  const projected = totalExp + dailyAvg * (DAYS_IN_MONTH - DAY);
-  const balEOM    = totalInc - projected;
-  const runOut    = balEOM < 0 ? Math.round(DAY + (totalInc - totalExp) / Math.max(dailyAvg, 1)) : null;
-  const pctSpent  = Math.min((projected / Math.max(totalInc, 1)) * 100, 120);
-  const [adding, setAdding] = useState(false);
-  const [form,   setForm]   = useState({ name: "", amount: "", day: "" });
-  const today    = new Date().getDate();
-  const totalRem = reminders.filter(r => r.active).reduce((a, r) => a + r.amount, 0);
-  const upcoming = reminders.filter(r => r.active && r.day >= today).sort((a, b) => a.day - b.day);
-  const past     = reminders.filter(r => r.active && r.day < today);
-
-  // Rachas y logros reales
-  const streak       = calcStreak(streakDays || []);
-  const savingGoal   = user.savingGoalPct || 20;
-  const ct = {};
-  expenses.forEach(e => { ct[e.cat] = (ct[e.cat] || 0) + e.amount; });
-  const budgetCats   = Object.entries(budgets);
-  const overBudget   = budgetCats.some(([k, l]) => (ct[k] || 0) > l);
-  const hasActiveGoal = goals && goals.length > 0;
-  const isSuperSaver  = savePct >= 30;
-  const noNewDebts    = state.debts && state.debts.length === 0;
-  const perfectMonth  = expenses.length >= 20 && !overBudget && savePct >= savingGoal;
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={["top"]}>
-      <View style={{ paddingHorizontal: 18, paddingTop: 12, paddingBottom: 8 }}>
-        <Text style={{ fontSize: 22, fontWeight: "800", color: C.t1 }}>Herramientas 🛠️</Text>
-      </View>
-      <View style={{ flexDirection: "row", marginHorizontal: 16, marginBottom: 10, backgroundColor: C.card, borderRadius: 14, padding: 4, borderWidth: 1, borderColor: C.border }}>
-        {[["score","🌡️ Score"],["resumen","📅 Resumen"],["predictor","🔮 Predictor"],["pagos","🔔 Pagos"]].map(([id, label]) => (
-          <TouchableOpacity key={id} onPress={() => setSub(id)} style={{ flex: 1, paddingVertical: 9, borderRadius: 11, backgroundColor: sub === id ? C.card2 : "transparent", alignItems: "center" }}>
-            <Text style={{ fontSize: 10, fontWeight: "700", color: sub === id ? C.t1 : C.t3 }}>{label}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
-
-        {sub === "resumen" && (() => {
-          const weeklyExp   = weeklyBreakdown(expenses);
-          const maxWeek     = Math.max(...weeklyExp, 1);
-          const weekNames   = ["Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5"];
-          const bestWeekIdx = weeklyExp.indexOf(Math.min(...weeklyExp.filter(w => w > 0)));
-          const worstWeekIdx= weeklyExp.indexOf(Math.max(...weeklyExp));
-          const today       = new Date().toISOString().split("T")[0];
-          const regToday    = (streakDays || []).includes(today);
-          const streak      = calcStreak(streakDays || []);
-          const { msg: smsg, color: scol, emoji: semoji } = streakMessage(streak, regToday);
-          const last30      = lastNDays(30);
-          const totalInc30  = income.reduce((a, i) => a + i.amount, 0);
-          const totalExp30  = expenses.reduce((a, e) => a + e.amount, 0);
-          const savePct30   = totalInc30 > 0 ? Math.round(((totalInc30 - totalExp30) / totalInc30) * 100) : 0;
-
-          // Días registrados este mes
-          const thisMonth   = TODAY.toISOString().slice(0, 7);
-          const daysThisMonth = (streakDays || []).filter(d => d.startsWith(thisMonth)).length;
-          const consistency = Math.round((daysThisMonth / DAY) * 100);
-
-          // Categoría más gastada
-          const ct30 = {};
-          expenses.forEach(e => { ct30[e.cat] = (ct30[e.cat] || 0) + e.amount; });
-          const topCat = Object.entries(ct30).sort((a, b) => b[1] - a[1])[0];
-
-          // Tendencia: comparar primera mitad del mes vs segunda
-          const firstHalf  = expenses.filter(e => new Date(e.date).getDate() <= 15).reduce((a, e) => a + e.amount, 0);
-          const secondHalf = expenses.filter(e => new Date(e.date).getDate() > 15).reduce((a, e) => a + e.amount, 0);
-          const trending   = secondHalf > firstHalf * 1.2 ? "up" : secondHalf < firstHalf * 0.8 ? "down" : "stable";
-          const trendInfo  = trending === "up"
-            ? { label: "Gasto acelerando", color: C.rose, icon: "📈", desc: "Gastas más en la segunda quincena" }
-            : trending === "down"
-            ? { label: "Gasto desacelerando", color: C.mint, icon: "📉", desc: "Excelente control en la segunda quincena" }
-            : { label: "Gasto estable", color: C.sky, icon: "➡️", desc: "Tu ritmo de gasto es consistente" };
-
-          return (
-            <>
-              {/* Mini Streak Card */}
-              <StreakBanner streakDays={streakDays || []} onPress={() => {}} />
-
-              {/* Resumen del Mes */}
-              <View style={{ marginHorizontal: 16, marginBottom: 14, borderRadius: 22, overflow: "hidden", borderWidth: 1, borderColor: C.violet + "40",
-                shadowColor: C.violet, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 14 }}>
-                <View style={{ backgroundColor: C.violet + "0C", padding: 18, paddingBottom: 0 }}>
-                  <Text style={{ fontSize: 10, color: C.violet, letterSpacing: 2.5, fontWeight: "700", marginBottom: 12 }}>RESUMEN DEL MES</Text>
-                  <View style={{ flexDirection: "row", gap: 10, marginBottom: 16 }}>
-                    {[
-                      [daysThisMonth + "/" + DAY, "Días activos", C.mint],
-                      [consistency + "%",          "Consistencia", consistency >= 70 ? C.mint : consistency >= 40 ? C.gold : C.rose],
-                      [streak + " 🔥",             "Racha actual", scol],
-                    ].map(([v, l, c]) => (
-                      <View key={l} style={{ flex: 1, backgroundColor: c + "12", borderRadius: 14, borderWidth: 1, borderColor: c + "30", padding: 12, alignItems: "center" }}>
-                        <Text style={{ fontSize: 18, fontWeight: "900", color: c }}>{v}</Text>
-                        <Text style={{ fontSize: 10, color: C.t3, marginTop: 4, textAlign: "center" }}>{l}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-                <View style={{ flexDirection: "row", backgroundColor: C.violet + "12", borderTopWidth: 1, borderTopColor: C.violet + "25" }}>
-                  <View style={{ flex: 1, paddingVertical: 13, alignItems: "center", borderRightWidth: 1, borderRightColor: C.violet + "20" }}>
-                    <Text style={{ fontSize: 15, fontWeight: "800", color: C.rose }}>{money(totalExp30, user.currency)}</Text>
-                    <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Total gastado</Text>
-                  </View>
-                  <View style={{ flex: 1, paddingVertical: 13, alignItems: "center" }}>
-                    <Text style={{ fontSize: 15, fontWeight: "800", color: savePct30 >= 20 ? C.mint : C.gold }}>{savePct30}%</Text>
-                    <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Ahorro del mes</Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Gráfica de barras semanal */}
-              {weeklyExp.some(w => w > 0) && (
-                <Card style={{ marginBottom: 14 }}>
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-                    <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Gasto por semana</Text>
-                    <Tag label={money(totalExp30, user.currency)} color={C.rose} />
-                  </View>
-                  <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, height: 100 }}>
-                    {weeklyExp.map((w, i) => {
-                      const h     = maxWeek > 0 ? Math.max((w / maxWeek) * 80, w > 0 ? 8 : 0) : 0;
-                      const isBest  = i === bestWeekIdx && w > 0;
-                      const isWorst = i === worstWeekIdx && weeklyExp.filter(x => x > 0).length > 1;
-                      const barCol  = isBest ? C.mint : isWorst ? C.rose : C.sky;
-                      return (
-                        <View key={i} style={{ flex: 1, alignItems: "center", justifyContent: "flex-end", height: 100 }}>
-                          {(isBest || isWorst) && (
-                            <Text style={{ fontSize: 8, color: barCol, fontWeight: "700", marginBottom: 3, letterSpacing: 0.3 }}>
-                              {isBest ? "MEJOR" : "MAYOR"}
-                            </Text>
-                          )}
-                          <View style={{
-                            width: "100%", height: h, borderRadius: 8,
-                            backgroundColor: barCol,
-                            shadowColor: barCol, shadowOffset: { width: 0, height: 0 },
-                            shadowOpacity: isBest || isWorst ? 0.6 : 0.2, shadowRadius: 6,
-                            opacity: w === 0 ? 0.15 : 1,
-                          }} />
-                          <Text style={{ fontSize: 9, color: i === Math.floor((DAY - 1) / 7) ? C.t1 : C.t3, marginTop: 5, fontWeight: "600" }}>
-                            {weekNames[i]}
-                          </Text>
-                          {w > 0 && (
-                            <Text style={{ fontSize: 8, color: barCol, fontWeight: "700", marginTop: 1 }}>
-                              {money(w, user.currency)}
-                            </Text>
-                          )}
-                        </View>
-                      );
-                    })}
-                  </View>
-                  {weeklyExp.filter(w => w > 0).length > 1 && (
-                    <View style={{ marginTop: 14, flexDirection: "row", gap: 10 }}>
-                      <View style={{ flex: 1, backgroundColor: C.mintBg2, borderRadius: 10, padding: 10, flexDirection: "row", gap: 6, alignItems: "center" }}>
-                        <Text style={{ fontSize: 14 }}>✅</Text>
-                        <View>
-                          <Text style={{ fontSize: 11, fontWeight: "700", color: C.mint }}>Mejor semana</Text>
-                          <Text style={{ fontSize: 10, color: C.t3 }}>{weekNames[bestWeekIdx]}: {money(weeklyExp[bestWeekIdx], user.currency)}</Text>
-                        </View>
-                      </View>
-                      <View style={{ flex: 1, backgroundColor: C.roseBg2, borderRadius: 10, padding: 10, flexDirection: "row", gap: 6, alignItems: "center" }}>
-                        <Text style={{ fontSize: 14 }}>⚠️</Text>
-                        <View>
-                          <Text style={{ fontSize: 11, fontWeight: "700", color: C.rose }}>Mayor gasto</Text>
-                          <Text style={{ fontSize: 10, color: C.t3 }}>{weekNames[worstWeekIdx]}: {money(weeklyExp[worstWeekIdx], user.currency)}</Text>
-                        </View>
-                      </View>
-                    </View>
-                  )}
-                </Card>
-              )}
-
-              {/* Tendencia de gasto */}
-              <Card style={{ marginBottom: 14, borderColor: trendInfo.color + "40" }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                  <View style={{ width: 48, height: 48, borderRadius: 15, backgroundColor: trendInfo.color + "18", borderWidth: 1, borderColor: trendInfo.color + "35", alignItems: "center", justifyContent: "center" }}>
-                    <Text style={{ fontSize: 22 }}>{trendInfo.icon}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 14, fontWeight: "800", color: trendInfo.color }}>{trendInfo.label}</Text>
-                    <Text style={{ fontSize: 11, color: C.t3, marginTop: 3, lineHeight: 16 }}>{trendInfo.desc}</Text>
-                  </View>
-                </View>
-                <View style={{ marginTop: 14, flexDirection: "row", gap: 10 }}>
-                  <View style={{ flex: 1, backgroundColor: C.card2, borderRadius: 10, padding: 10 }}>
-                    <Text style={{ fontSize: 10, color: C.t3, marginBottom: 3 }}>1ra quincena</Text>
-                    <Text style={{ fontSize: 14, fontWeight: "800", color: C.t1 }}>{money(firstHalf, user.currency)}</Text>
-                  </View>
-                  <View style={{ flex: 1, backgroundColor: C.card2, borderRadius: 10, padding: 10 }}>
-                    <Text style={{ fontSize: 10, color: C.t3, marginBottom: 3 }}>2da quincena</Text>
-                    <Text style={{ fontSize: 14, fontWeight: "800", color: trending === "up" ? C.rose : trending === "down" ? C.mint : C.t1 }}>{money(secondHalf, user.currency)}</Text>
-                  </View>
-                </View>
-              </Card>
-
-              {/* Categoría estrella y peor */}
-              {topCat && (
-                <Card style={{ marginBottom: 14 }}>
-                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Protagonista del mes</Text>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                    <CatIcon cat={topCat[0]} size={52} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 16, fontWeight: "800", color: C.t1 }}>{topCat[0]}</Text>
-                      <Text style={{ fontSize: 12, color: C.t3, marginTop: 3 }}>Tu mayor gasto este mes</Text>
-                      <View style={{ marginTop: 8 }}>
-                        <Bar pct={totalExp30 > 0 ? (topCat[1] / totalExp30) * 100 : 0} color={CATS[topCat[0]]?.color || C.mint} h={6} showGlow />
-                      </View>
-                    </View>
-                    <View style={{ alignItems: "flex-end" }}>
-                      <Text style={{ fontSize: 16, fontWeight: "900", color: CATS[topCat[0]]?.color || C.mint }}>{money(topCat[1], user.currency)}</Text>
-                      <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>
-                        {totalExp30 > 0 ? Math.round((topCat[1] / totalExp30) * 100) : 0}% del total
-                      </Text>
-                    </View>
-                  </View>
-                </Card>
-              )}
-
-              {/* Calendario de actividad — últimos 30 días */}
-              <Card style={{ marginBottom: 14 }}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Actividad del mes</Text>
-                  <Tag label={daysThisMonth + " días activos"} color={C.mint} />
-                </View>
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 5 }}>
-                  {Array.from({ length: DAYS_IN_MONTH }, (_, i) => {
-                    const dayNum = i + 1;
-                    const dayStr = `${TODAY.getFullYear()}-${String(TODAY.getMonth() + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
-                    const done   = (streakDays || []).includes(dayStr);
-                    const isPast = dayNum <= DAY;
-                    const isT    = dayNum === DAY;
-                    return (
-                      <View key={dayNum} style={{
-                        width: 28, height: 28, borderRadius: 8,
-                        backgroundColor: done ? C.mint : isT ? C.mintBg2 : isPast ? C.card3 : C.card2,
-                        borderWidth: isT ? 1.5 : 0,
-                        borderColor: isT ? C.mint + "80" : "transparent",
-                        alignItems: "center", justifyContent: "center",
-                      }}>
-                        {done
-                          ? <Text style={{ fontSize: 12 }}>🔥</Text>
-                          : <Text style={{ fontSize: 10, color: isPast ? C.t4 : C.t5, fontWeight: "600" }}>{dayNum}</Text>
-                        }
-                      </View>
-                    );
-                  })}
-                </View>
-                <View style={{ flexDirection: "row", gap: 16, marginTop: 12, justifyContent: "center" }}>
-                  {[[C.mint, "🔥", "Registrado"], [C.card3, null, "Sin registro"], [C.card2, null, "Futuro"]].map(([col, ic, lab]) => (
-                    <View key={lab} style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-                      <View style={{ width: 14, height: 14, borderRadius: 4, backgroundColor: col, alignItems: "center", justifyContent: "center" }}>
-                        {ic && <Text style={{ fontSize: 8 }}>{ic}</Text>}
-                      </View>
-                      <Text style={{ fontSize: 10, color: C.t3 }}>{lab}</Text>
-                    </View>
-                  ))}
-                </View>
-              </Card>
-            </>
-          );
-        })()}
-
-        {sub === "score" && (
-          <>
-            {/* Score Hero */}
-            <View style={{ marginHorizontal: 16, marginBottom: 14, borderRadius: 24, overflow: "hidden", borderWidth: 1, borderColor: grade.color + "45",
-              shadowColor: grade.color, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 20, elevation: 8 }}>
-              <View style={{ backgroundColor: grade.color + "0C", padding: 28, alignItems: "center" }}>
-                <Text style={{ fontSize: 32, marginBottom: 10 }}>{grade.emoji}</Text>
-                <Text style={{ fontSize: 72, fontWeight: "900", color: grade.color, letterSpacing: -3, lineHeight: 76 }}>{total}</Text>
-                <Text style={{ fontSize: 13, color: C.t3, marginTop: 2, letterSpacing: 0.5 }}>puntos de 100</Text>
-                <View style={{ marginTop: 12 }}>
-                  <Tag label={grade.label} color={grade.color} />
-                </View>
-                <Text style={{ fontSize: 11, color: C.t3, marginTop: 10 }}>Tu salud financiera este mes</Text>
-              </View>
-              <View style={{ flexDirection: "row", backgroundColor: grade.color + "12", borderTopWidth: 1, borderTopColor: grade.color + "25" }}>
-                {[
-                  [streak + " días", "Racha", C.orange],
-                  [savePct + "%",    "Ahorro", C.mint],
-                  [expenses.length + "", "Registros", C.sky],
-                ].map(([v, l, c], i) => (
-                  <View key={l} style={{ flex: 1, paddingVertical: 13, alignItems: "center", borderRightWidth: i < 2 ? 1 : 0, borderRightColor: grade.color + "20" }}>
-                    <Text style={{ fontSize: 17, fontWeight: "800", color: c }}>{v}</Text>
-                    <Text style={{ fontSize: 10, color: C.t3, marginTop: 3, letterSpacing: 0.5 }}>{l}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-
-            {/* Score Breakdown */}
-            <Card style={{ marginBottom: 14 }}>
-              <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1, marginBottom: 16 }}>Desglose del Score</Text>
-              {[
-                ["💰", "Tasa de ahorro",   s.ahorro,      C.mint],
-                ["📊", "Control",          s.presupuesto, C.sky],
-                ["📝", "Registro",         s.consistencia,C.violet],
-                ["💳", "Manejo de deudas", s.deuda,       C.gold],
-              ].map(([ic, label, val, color], idx) => (
-                <View key={label} style={{ marginBottom: idx < 3 ? 14 : 0 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 7 }}>
-                    <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: color + "18", borderWidth: 1, borderColor: color + "30", alignItems: "center", justifyContent: "center" }}>
-                      <Text style={{ fontSize: 16 }}>{ic}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
-                        <Text style={{ fontSize: 13, color: C.t2 }}>{label}</Text>
-                        <Text style={{ fontSize: 13, fontWeight: "800", color }}>{Math.round(val)}pts</Text>
-                      </View>
-                      <Bar pct={val} color={color} h={6} showGlow />
-                    </View>
-                  </View>
-                </View>
-              ))}
-            </Card>
-
-            {/* Logros */}
-            <Card>
-              <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1, marginBottom: 16 }}>Logros 🏅</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
-                {[
-                  ["🔥", "Racha activa",    streak + " días registrando",    streak >= 3,   C.orange],
-                  ["💯", "Sin exceder",      "Presupuesto OK",                !overBudget && expenses.length > 0, C.mint],
-                  ["🎯", "Meta activa",      "Ahorro en curso",               hasActiveGoal, C.sky],
-                  ["🦸", "Super ahorrador", "30%+ ahorro",                   isSuperSaver,  C.gold],
-                  ["🧘", "Sin deudas",      "Lista de deudas limpia",        noNewDebts,    C.green],
-                  ["📆", "Mes perfecto",    "20+ registros, meta alcanzada", perfectMonth,  C.violet],
-                ].map(([ic, label, desc, done, col]) => (
-                  <View key={label} style={{ width: "47%", backgroundColor: done ? col + "14" : C.card2, borderRadius: 16, borderWidth: 1, borderColor: done ? col + "45" : C.border, padding: 14, opacity: done ? 1 : 0.3 }}>
-                    <Text style={{ fontSize: 24, marginBottom: 8 }}>{ic}</Text>
-                    <Text style={{ fontSize: 12, fontWeight: "800", color: done ? col : C.t3, marginBottom: 2 }}>{label}</Text>
-                    <Text style={{ fontSize: 10, color: C.t3, lineHeight: 14 }}>{desc}</Text>
-                    {done && <View style={{ position: "absolute", top: 10, right: 10, width: 8, height: 8, borderRadius: 4, backgroundColor: col }} />}
-                  </View>
-                ))}
-              </View>
-            </Card>
-          </>
-        )}
-
-        {sub === "predictor" && (
-          <>
-            <Card style={{ marginBottom: 12, borderColor: runOut ? C.rose + "50" : C.mint + "40", backgroundColor: runOut ? "#150008" : "#00100A" }}>
-              <Text style={{ fontSize: 11, color: runOut ? C.rose : C.mint, letterSpacing: 2, marginBottom: 8 }}>{runOut ? "⚠️ ALERTA" : "✅ PROYECCION FAVORABLE"}</Text>
-              {runOut ? (
-                <Text style={{ fontSize: 15, color: C.rose, fontWeight: "700", lineHeight: 22 }}>
-                  A este ritmo te quedaras sin dinero el dia <Text style={{ fontSize: 24 }}>{runOut}</Text>
-                </Text>
-              ) : (
-                <>
-                  <Text style={{ fontSize: 11, color: C.t3, marginBottom: 4 }}>Balance al dia {DAYS_IN_MONTH}</Text>
-                  <Text style={{ fontSize: 38, fontWeight: "800", color: C.mint, letterSpacing: -1 }}>{money(Math.round(balEOM), cur)}</Text>
-                  <Text style={{ fontSize: 12, color: C.t3, marginTop: 6 }}>Ritmo actual: <Text style={{ color: C.t1, fontWeight: "600" }}>{money(Math.round(dailyAvg), cur)}/dia</Text></Text>
-                </>
-              )}
-              <View style={{ marginTop: 16 }}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
-                  <Text style={{ fontSize: 11, color: C.t3 }}>Dia {DAY} de {DAYS_IN_MONTH}</Text>
-                  <Text style={{ fontSize: 11, fontWeight: "700", color: pctSpent > 100 ? C.rose : pctSpent > 80 ? C.gold : C.mint }}>{Math.round(pctSpent)}% proyectado</Text>
-                </View>
-                <Bar pct={pctSpent} color={C.mint} h={6} />
-                <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 5 }}>
-                  <Text style={{ fontSize: 10, color: C.t3 }}>Gastado: {money(totalExp, cur)}</Text>
-                  <Text style={{ fontSize: 10, color: C.t3 }}>Proyectado: {money(Math.round(projected), cur)}</Text>
-                </View>
-              </View>
-            </Card>
-            <Card style={{ flexDirection: "row", padding: 0, overflow: "hidden", marginBottom: 12 }}>
-              {[[money(Math.round(dailyAvg), cur), "Por dia", C.gold], [money(Math.round(dailyAvg * 7), cur), "Por semana", C.sky], [(DAYS_IN_MONTH - DAY) + " dias", "Restantes", C.violet]].map(([v, l, c], i) => (
-                <View key={l} style={{ flex: 1, padding: 16, alignItems: "center", borderRightWidth: i < 2 ? 1 : 0, borderRightColor: C.border }}>
-                  <Text style={{ fontSize: 13, fontWeight: "800", color: c, marginBottom: 3 }}>{v}</Text>
-                  <Text style={{ fontSize: 10, color: C.t3 }}>{l}</Text>
-                </View>
-              ))}
-            </Card>
-            {totalInc > 0 && (
-              <Card style={{ marginBottom: 12 }}>
-                <Text style={{ fontSize: 13, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Lineas de referencia</Text>
-                {(() => {
-                  const goalAmt = totalInc * (savingGoal / 100);
-                  const maxGastable = totalInc - goalAmt;
-                  const pctGastado = Math.min((totalExp / maxGastable) * 100, 120);
-                  const pctIngresos = Math.min((totalExp / totalInc) * 100, 100);
-                  return (
-                    <>
-                      <View style={{ marginBottom: 12 }}>
-                        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
-                          <Text style={{ fontSize: 12, color: C.t2 }}>🟢 Meta de ahorro ({savingGoal}%)</Text>
-                          <Text style={{ fontSize: 12, fontWeight: "700", color: pctGastado > 100 ? C.rose : C.green }}>{Math.round(pctGastado)}%</Text>
-                        </View>
-                        <Bar pct={pctGastado} color={C.green} h={5} />
-                        <Text style={{ fontSize: 10, color: C.t3, marginTop: 4 }}>Puedes gastar hasta {money(Math.round(maxGastable), cur)} para cumplir tu meta</Text>
-                      </View>
-                      <View>
-                        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
-                          <Text style={{ fontSize: 12, color: C.t2 }}>🔵 Limite de ingresos</Text>
-                          <Text style={{ fontSize: 12, fontWeight: "700", color: C.sky }}>{money(totalInc, cur)}</Text>
-                        </View>
-                        <Bar pct={pctIngresos} color={C.sky} h={5} />
-                        <Text style={{ fontSize: 10, color: C.t3, marginTop: 4 }}>Gastado: {Math.round(pctIngresos)}% de tus ingresos totales</Text>
-                      </View>
-                    </>
-                  );
-                })()}
-              </Card>
-            )}
-          </>
-        )}
-
-        {sub === "pagos" && (
-          <>
-            <Card accent style={{ marginBottom: 12 }}>
-              <Text style={{ fontSize: 11, color: C.t3, letterSpacing: 1.5, marginBottom: 4 }}>COMPROMISOS ESTE MES</Text>
-              <Text style={{ fontSize: 32, fontWeight: "800", color: C.mint, letterSpacing: -0.5 }}>{money(totalRem, cur)}</Text>
-              <Text style={{ fontSize: 12, color: C.t3, marginTop: 4 }}>{reminders.filter(r => r.active).length} pagos programados</Text>
-            </Card>
-            {upcoming.length > 0 && (
-              <Card style={{ marginBottom: 12 }}>
-                <Text style={{ fontSize: 12, fontWeight: "700", color: C.gold, marginBottom: 14 }}>Proximos pagos</Text>
-                {upcoming.map((r, i) => {
-                  const d = r.day - today, urgent = d <= 3;
-                  return (
-                    <View key={r.id}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                        <View style={{ width: 44, height: 44, borderRadius: 13, backgroundColor: urgent ? C.roseBg : C.goldBg, borderWidth: 1, borderColor: urgent ? C.rose + "40" : C.gold + "40", alignItems: "center", justifyContent: "center" }}>
-                          <Text style={{ fontSize: 14, fontWeight: "800", color: urgent ? C.rose : C.gold, lineHeight: 17 }}>{r.day}</Text>
-                          <Text style={{ fontSize: 8, color: C.t3, letterSpacing: 0.5 }}>DIA</Text>
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 13, fontWeight: "600", color: C.t1 }}>{r.name}</Text>
-                          <Text style={{ fontSize: 11, color: urgent ? C.rose : C.t3, marginTop: 1 }}>{d === 0 ? "Hoy!" : d === 1 ? "Manana" : "En " + d + " dias"}</Text>
-                        </View>
-                        <View style={{ alignItems: "flex-end" }}>
-                          <Text style={{ fontSize: 14, fontWeight: "700", color: C.gold }}>{money(r.amount, cur)}</Text>
-                          <TouchableOpacity onPress={() => setReminders(reminders.filter(x => x.id !== r.id))}><Text style={{ fontSize: 11, color: C.t4, marginTop: 2 }}>quitar</Text></TouchableOpacity>
-                        </View>
-                      </View>
-                      {i < upcoming.length - 1 && <View style={{ height: 1, backgroundColor: C.border, marginVertical: 10, marginLeft: 56 }} />}
-                    </View>
-                  );
-                })}
-              </Card>
-            )}
-            {past.length > 0 && (
-              <Card style={{ marginBottom: 12 }}>
-                <Text style={{ fontSize: 12, fontWeight: "700", color: C.t3, marginBottom: 14 }}>Ya pagados ✅</Text>
-                {past.map((r, i) => (
-                  <View key={r.id}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, opacity: 0.4 }}>
-                      <View style={{ width: 44, height: 44, borderRadius: 13, backgroundColor: C.mintBg, alignItems: "center", justifyContent: "center" }}><Text style={{ fontSize: 18, color: C.mint }}>✓</Text></View>
-                      <View style={{ flex: 1 }}><Text style={{ fontSize: 13, fontWeight: "600", color: C.t1, textDecorationLine: "line-through" }}>{r.name}</Text><Text style={{ fontSize: 11, color: C.t3 }}>Dia {r.day}</Text></View>
-                      <Text style={{ fontSize: 14, fontWeight: "700", color: C.t2 }}>{money(r.amount, cur)}</Text>
-                    </View>
-                    {i < past.length - 1 && <View style={{ height: 1, backgroundColor: C.border, marginVertical: 10, marginLeft: 56 }} />}
-                  </View>
-                ))}
-              </Card>
-            )}
-            {reminders.length === 0 && !adding && (
-              <Card style={{ alignItems: "center", paddingVertical: 36 }}>
-                <Text style={{ fontSize: 44, marginBottom: 14 }}>🔔</Text>
-                <Text style={{ fontSize: 15, fontWeight: "700", color: C.t1, marginBottom: 6 }}>Sin recordatorios</Text>
-                <Text style={{ fontSize: 13, color: C.t3, textAlign: "center" }}>Agrega tus pagos fijos para nunca olvidarlos.</Text>
-              </Card>
-            )}
-            {adding ? (
-              <Card>
-                <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1, marginBottom: 14 }}>Nuevo recordatorio</Text>
-                <Input value={form.name} onChange={v => setForm({ ...form, name: v })} placeholder="Nombre (ej: Netflix, Luz)" />
-                <Input value={form.amount} onChange={v => setForm({ ...form, amount: v })} placeholder={"Monto (" + cur + ")"} numeric />
-                <Input value={form.day} onChange={v => setForm({ ...form, day: v })} placeholder="Dia del mes (1-31)" numeric />
-                <View style={{ flexDirection: "row", gap: 10, marginTop: 4 }}>
-                  <Btn label="Cancelar" onPress={() => setAdding(false)} ghost style={{ flex: 1 }} />
-                  <Btn label="Guardar" onPress={() => { if (!form.name || !form.amount || !form.day) return; setReminders([...reminders, { id: Date.now(), ...form, amount: +form.amount, day: +form.day, active: true }]); setAdding(false); setForm({ name: "", amount: "", day: "" }); }} style={{ flex: 2 }} />
-                </View>
-              </Card>
-            ) : (
-              <View style={{ marginHorizontal: 16 }}><Btn label="+ Nuevo recordatorio" onPress={() => setAdding(true)} ghost /></View>
-            )}
-          </>
-        )}
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
 function SettingsModal({ state, updateState, onClose, isDark, onToggleTheme }) {
   const { user, income, budgets } = state;
   const cur = user.currency;
@@ -2426,14 +2126,14 @@ function SettingsModal({ state, updateState, onClose, isDark, onToggleTheme }) {
             ))}
           </View>
 
-          <Text style={[styles.lbl, { marginBottom: 6 }]}>LÍMITES DE PRESUPUESTO</Text>
+          <Text style={[styles.lbl, { marginBottom: 6 }]}>LIMITES DE PRESUPUESTO</Text>
           {Object.keys(CATS).slice(0, 6).map(cat => (
             <View key={cat} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: (CATS[cat]?.color || C.mint) + "20", alignItems: "center", justifyContent: "center" }}>
                 <Text style={{ fontSize: 16 }}>{CATS[cat]?.icon}</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Input value={buds[cat] ? String(buds[cat]) : ""} onChange={v => setBuds({ ...buds, [cat]: +v || 0 })} placeholder={cat + " (0 = sin límite)"} numeric style={{ marginBottom: 0 }} />
+                <Input value={buds[cat] ? String(buds[cat]) : ""} onChange={v => setBuds({ ...buds, [cat]: +v || 0 })} placeholder={cat + " (0 = sin limite)"} numeric style={{ marginBottom: 0 }} />
               </View>
             </View>
           ))}
@@ -2446,34 +2146,29 @@ function SettingsModal({ state, updateState, onClose, isDark, onToggleTheme }) {
 }
 
 // ─────────────────────────────────────────────
-// NAV BAR
+// NAV BAR — 3 Tabs
 // ─────────────────────────────────────────────
 function NavBar({ tab, setTab, isDark }) {
   const insets = useSafeAreaInsets();
   const items = [
-    { id: "home",         icon: "◈",  label: "Inicio" },
-    { id: "chat",         icon: "◉",  label: "IA"     },
-    { id: "deudas",       icon: "💳", label: "Deudas" },
-    { id: "metas",        icon: "◎",  label: "Metas"  },
-    { id: "herramientas", icon: "⋯",  label: "Más"    },
+    { id: "home",       icon: "🏠", label: "Inicio"     },
+    { id: "estrategia", icon: "📊", label: "Estrategia" },
+    { id: "chat",       icon: "🤖", label: "Asistente"  },
   ];
-  const navBg     = C.card;
-  const activeTxt = C.mint;
-  const inactTxt  = C.t3;
   return (
-    <View style={{ flexDirection: "row", backgroundColor: navBg, borderTopWidth: 1, borderTopColor: C.border2,
+    <View style={{ flexDirection: "row", backgroundColor: C.card, borderTopWidth: 1, borderTopColor: C.border2,
       paddingTop: 4, paddingBottom: insets.bottom + 8 }}>
       {items.map(item => {
         const active = tab === item.id;
         return (
           <TouchableOpacity key={item.id} onPress={() => setTab(item.id)}
             style={{ flex: 1, alignItems: "center", paddingVertical: 4, position: "relative" }} activeOpacity={0.7}>
-            {active && <View style={{ position: "absolute", top: 0, width: 36, height: 2.5, backgroundColor: activeTxt, borderRadius: 99 }} />}
+            {active && <View style={{ position: "absolute", top: 0, width: 36, height: 2.5, backgroundColor: C.mint, borderRadius: 99 }} />}
             <View style={{ marginTop: 6, width: 36, height: 28, alignItems: "center", justifyContent: "center",
               backgroundColor: active ? C.mintBg2 : "transparent", borderRadius: 10 }}>
-              <Text style={{ fontSize: item.icon.length > 2 ? 14 : 20, color: active ? activeTxt : inactTxt }}>{item.icon}</Text>
+              <Text style={{ fontSize: 18 }}>{item.icon}</Text>
             </View>
-            <Text style={{ fontSize: 9, fontWeight: "700", color: active ? activeTxt : inactTxt, marginTop: 2, letterSpacing: 0.5 }}>{item.label}</Text>
+            <Text style={{ fontSize: 9, fontWeight: "700", color: active ? C.mint : C.t3, marginTop: 2, letterSpacing: 0.5 }}>{item.label}</Text>
           </TouchableOpacity>
         );
       })}
@@ -2490,7 +2185,7 @@ export default function App() {
   const [showSettings,  setShowSettings]  = useState(false);
   const [showFABGlobal, setShowFABGlobal] = useState(false);
   const [isDark,        setIsDark]        = useState(true);
-  const [themeKey,      setThemeKey]      = useState(0); // fuerza re-render al cambiar tema
+  const [themeKey,      setThemeKey]      = useState(0);
   const saveTimer = useRef(null);
 
   // Aplicar tema al montar y cuando cambia
@@ -2503,7 +2198,6 @@ export default function App() {
   useEffect(() => {
     loadApp().then(saved => {
       if (saved && saved.onboarded && saved.user) {
-        // Restaurar preferencia de tema si existe
         if (saved.user.darkMode === false) {
           setIsDark(false);
           applyTheme(false);
@@ -2536,7 +2230,29 @@ export default function App() {
     updateState({ user: { ...appState.user, darkMode: dark } });
   }
 
-  // Onboarding completado — sin .finally para mayor compatibilidad
+  // Toggle privacidad
+  function togglePrivacy() {
+    updateState({ hideAmounts: !appState.hideAmounts });
+    Vibration.vibrate(30);
+  }
+
+  // Activar freno de emergencia (48 horas)
+  function activateEmergencyBrake() {
+    const brakeUntil = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+    updateState({ emergencyBrakeUntil: brakeUntil });
+    Vibration.vibrate([0, 100, 50, 100]);
+    Alert.alert("🛑 Freno Activado", "Las categorias de Ocio, Suscripciones y Lujos estan bloqueadas por 48 horas.");
+  }
+
+  // Agregar a meta (round-up o desde chat)
+  function addToGoal(goalId, amount) {
+    const goals = (appState.goals || []).map(g => 
+      g.id === goalId ? { ...g, saved: g.saved + amount } : g
+    );
+    updateState({ goals });
+  }
+
+  // Onboarding completado
   function onDone(data) {
     const next = {
       onboarded: true,
@@ -2548,11 +2264,13 @@ export default function App() {
       reminders: [],
       budgets:   data.budgets,
       streakDays:[],
+      hideAmounts: false,
+      emergencyBrakeUntil: null,
     };
     saveApp(next).then(() => {
       setAppState(next);
     }).catch(() => {
-      setAppState(next); // igual muestra la app aunque falle el guardado
+      setAppState(next);
     });
   }
 
@@ -2590,21 +2308,65 @@ export default function App() {
   };
 
   const updateIncome = (inc) => updateState({ income: inc });
+  const setGoals = (g) => updateState({ goals: g });
+  const setDebts = (d) => updateState({ debts: d });
 
   return (
     <SafeAreaProvider key={themeKey}>
       <View style={{ flex: 1, backgroundColor: C.bg }}>
         <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={C.bg} />
-        {tab === "home"         && <HomeScreen state={s} openSettings={() => setShowSettings(true)}
-          onAddExpense={addExpenseWithStreak} onUpdateIncome={updateIncome} onDeleteExpense={deleteExpense} />}
-        {tab === "chat"         && <ChatScreen state={s} addExpense={addExpenseWithStreak} />}
-        {tab === "deudas"       && <DeudasScreen state={s} setDebts={v => updateState({ debts: v })} />}
-        {tab === "metas"        && <MetasScreen state={s} setGoals={v => updateState({ goals: v })} />}
-        {tab === "herramientas" && <HerramientasScreen state={s} setReminders={v => updateState({ reminders: v })} />}
+        
+        {tab === "home" && (
+          <HomeScreen 
+            state={s} 
+            openSettings={() => setShowSettings(true)}
+            onAddExpense={addExpenseWithStreak} 
+            onUpdateIncome={updateIncome} 
+            onDeleteExpense={deleteExpense}
+            onTogglePrivacy={togglePrivacy}
+            onActivateEmergencyBrake={activateEmergencyBrake}
+            onRoundUp={addToGoal}
+          />
+        )}
+        {tab === "estrategia" && (
+          <EstrategiaScreen 
+            state={s} 
+            setGoals={setGoals} 
+            setDebts={setDebts} 
+          />
+        )}
+        {tab === "chat" && (
+          <ChatScreen 
+            state={s} 
+            addExpense={addExpenseWithStreak}
+            onActivateEmergencyBrake={activateEmergencyBrake}
+            onAddToGoal={addToGoal}
+          />
+        )}
+        
         <NavBar tab={tab} setTab={setTab} isDark={isDark} />
+        
         {tab !== "chat" && <FAB onPress={() => setShowFABGlobal(true)} />}
-        <FABModal visible={showFABGlobal} onClose={() => setShowFABGlobal(false)} onSave={addExpenseWithStreak} cur={s.user?.currency || "RD$"} />
-        {showSettings && <SettingsModal state={s} updateState={updateState} onClose={() => setShowSettings(false)} isDark={isDark} onToggleTheme={toggleTheme} />}
+        
+        <FABModal 
+          visible={showFABGlobal} 
+          onClose={() => setShowFABGlobal(false)} 
+          onSave={addExpenseWithStreak} 
+          cur={s.user?.currency || "RD$"} 
+          goals={s.goals}
+          emergencyBrakeActive={isEmergencyBrakeActive(s.emergencyBrakeUntil)}
+          onRoundUp={addToGoal}
+        />
+        
+        {showSettings && (
+          <SettingsModal 
+            state={s} 
+            updateState={updateState} 
+            onClose={() => setShowSettings(false)} 
+            isDark={isDark} 
+            onToggleTheme={toggleTheme} 
+          />
+        )}
       </View>
     </SafeAreaProvider>
   );
@@ -2622,6 +2384,4 @@ const styles = StyleSheet.create({
   obH:     { fontSize: 28, fontWeight: "900", color: C.t1, marginBottom: 6, letterSpacing: -0.8 },
   obSub:   { fontSize: 13, color: C.t2, marginBottom: 24, lineHeight: 20 },
   lbl:     { fontSize: 10, color: C.t3, letterSpacing: 2, fontWeight: "700", marginBottom: 6, textTransform: "uppercase" },
-  navBar:  { flexDirection: "row", backgroundColor: C.card, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 4 },
-  navBtn:  { flex: 1, alignItems: "center", paddingVertical: 4, position: "relative" },
 });
