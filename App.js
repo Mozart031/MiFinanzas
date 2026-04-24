@@ -9,44 +9,42 @@ import { SafeAreaView, SafeAreaProvider, useSafeAreaInsets } from "react-native-
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // ─────────────────────────────────────────────
-// COLORES
+// TEMA — dark / light con paletas completas
 // ─────────────────────────────────────────────
-const C = {
-  bg:      "#060608",
-  card:    "#0F0F18",
-  card2:   "#161620",
-  card3:   "#1C1C28",
-  border:  "#22223A",
-  border2: "#2E2E48",
-  mint:    "#00E5B0",
-  mintDim: "#00C49A",
-  mintBg:  "#00E5B012",
-  mintBg2: "#00E5B025",
-  gold:    "#F5B800",
-  goldDim: "#D4A000",
-  goldBg:  "#F5B80012",
-  goldBg2: "#F5B80028",
-  rose:    "#FF4D6D",
-  roseDim: "#E03358",
-  roseBg:  "#FF4D6D12",
-  roseBg2: "#FF4D6D28",
-  sky:     "#38BDF8",
-  skyDim:  "#22A8E8",
-  skyBg:   "#38BDF812",
-  skyBg2:  "#38BDF828",
-  violet:  "#A78BFA",
-  violetBg:"#A78BFA12",
-  green:   "#10B981",
-  greenBg: "#10B98112",
-  orange:  "#FB923C",
-  orangeBg:"#FB923C12",
-  pink:    "#EC4899",
-  t1:      "#F0F0FA",
-  t2:      "#9898B8",
-  t3:      "#55556A",
-  t4:      "#28283A",
-  t5:      "#1A1A28",
+const DARK_THEME = {
+  bg:       "#060608", card:    "#0F0F18", card2:   "#161620",
+  card3:    "#1C1C28", border:  "#22223A", border2: "#2E2E48",
+  mint:     "#00E5B0", mintDim: "#00C49A", mintBg:  "#00E5B012", mintBg2: "#00E5B025",
+  gold:     "#F5B800", goldDim: "#D4A000", goldBg:  "#F5B80012", goldBg2: "#F5B80028",
+  rose:     "#FF4D6D", roseDim: "#E03358", roseBg:  "#FF4D6D12", roseBg2: "#FF4D6D28",
+  sky:      "#38BDF8", skyDim:  "#22A8E8", skyBg:   "#38BDF812", skyBg2:  "#38BDF828",
+  violet:   "#A78BFA", violetBg:"#A78BFA12",
+  green:    "#10B981", greenBg: "#10B98112",
+  orange:   "#FB923C", orangeBg:"#FB923C12",
+  pink:     "#EC4899",
+  t1: "#F0F0FA", t2: "#9898B8", t3: "#55556A", t4: "#28283A", t5: "#1A1A28",
 };
+
+const LIGHT_THEME = {
+  bg:       "#F0F4F8", card:    "#FFFFFF", card2:   "#F7F9FC",
+  card3:    "#EDF0F5", border:  "#DDE2EA", border2: "#C8D0DC",
+  mint:     "#00B88A", mintDim: "#009A74", mintBg:  "#00B88A14", mintBg2: "#00B88A28",
+  gold:     "#D4920A", goldDim: "#B87E08", goldBg:  "#D4920A14", goldBg2: "#D4920A28",
+  rose:     "#E8274B", roseDim: "#C82040", roseBg:  "#E8274B14", roseBg2: "#E8274B28",
+  sky:      "#0EA5E9", skyDim:  "#0284C7", skyBg:   "#0EA5E914", skyBg2:  "#0EA5E928",
+  violet:   "#7C3AED", violetBg:"#7C3AED14",
+  green:    "#059669", greenBg: "#05966914",
+  orange:   "#EA580C", orangeBg:"#EA580C14",
+  pink:     "#DB2777",
+  t1: "#0F172A", t2: "#475569", t3: "#94A3B8", t4: "#CBD5E1", t5: "#E2E8F0",
+};
+
+// C es un proxy mutable — se actualiza cuando cambia el tema
+let C = { ...DARK_THEME };
+function applyTheme(isDark) {
+  const src = isDark ? DARK_THEME : LIGHT_THEME;
+  Object.keys(src).forEach(k => { C[k] = src[k]; });
+}
 
 // ─────────────────────────────────────────────
 // DATOS POR DEFECTO — limpios, sin datos de ejemplo
@@ -67,7 +65,7 @@ const CATS = {
 // ─────────────────────────────────────────────
 // STORAGE — guardado simple y directo
 // ─────────────────────────────────────────────
-const STORE_KEY = "mifinanzas_v5";
+const STORE_KEY = "mifinanzas_v6";
 
 function loadApp() {
   return AsyncStorage.getItem(STORE_KEY)
@@ -629,13 +627,28 @@ function IngresosModal({ visible, onClose, income, onSave, cur }) {
 // LOADING
 // ─────────────────────────────────────────────
 function Loading() {
+  const pulse = useRef(new Animated.Value(0.6)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1,   duration: 900, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.6, duration: 900, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
   return (
-    <View style={{ flex: 1, backgroundColor: C.bg, alignItems: "center", justifyContent: "center" }}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-      <Text style={{ fontSize: 56 }}>💰</Text>
-      <Text style={{ fontSize: 28, fontWeight: "800", color: C.mint, marginTop: 16, letterSpacing: -1 }}>MiFinanzas</Text>
-      <ActivityIndicator color={C.mint} size="large" style={{ marginTop: 24 }} />
-      <Text style={{ fontSize: 13, color: C.t3, marginTop: 12 }}>Cargando tu informacion...</Text>
+    <View style={{ flex: 1, backgroundColor: DARK_THEME.bg, alignItems: "center", justifyContent: "center" }}>
+      <StatusBar barStyle="light-content" backgroundColor={DARK_THEME.bg} />
+      <Animated.View style={{ opacity: pulse, alignItems: "center" }}>
+        <View style={{ width: 88, height: 88, borderRadius: 26, backgroundColor: DARK_THEME.mintBg2,
+          borderWidth: 2, borderColor: DARK_THEME.mint + "50", alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
+          <Text style={{ fontSize: 44 }}>💚</Text>
+        </View>
+        <Text style={{ fontSize: 28, fontWeight: "900", color: DARK_THEME.t1, letterSpacing: -1 }}>
+          Mi<Text style={{ color: DARK_THEME.mint }}>Finanzas</Text>
+        </Text>
+        <Text style={{ fontSize: 12, color: DARK_THEME.t3, marginTop: 8, letterSpacing: 1.5 }}>CARGANDO...</Text>
+      </Animated.View>
     </View>
   );
 }
@@ -1627,106 +1640,233 @@ function DeudasScreen({ state, setDebts }) {
 // METAS
 // ─────────────────────────────────────────────
 function MetasScreen({ state, setGoals }) {
-  const { user, goals } = state;
+  const { user, goals, income } = state;
   const cur = user.currency;
-  const [adding, setAdding] = useState(false);
-  const [form,   setForm]   = useState({ name: "", emoji: "🎯", target: "", weeks: "12" });
+  const totalInc = income.reduce((a, i) => a + i.amount, 0);
+  const [adding,   setAdding]   = useState(false);
+  const [selected, setSelected] = useState(0); // índice de meta activa
+  const [form,     setForm]     = useState({ name: "", emoji: "🎯", target: "", weeks: "12" });
+
+  const goalColors = [C.sky, C.mint, C.violet, C.gold, C.orange, C.pink];
+
+  // Meta activa seleccionada
+  const active = goals.length > 0 ? goals[selected] || goals[0] : null;
+  const activePct = active ? Math.min((active.saved / active.target) * 100, 100) : 0;
+  const activeColor = goalColors[selected % goalColors.length];
+
+  // Progreso circular con CSS trick (no SVG)
+  function CircularProgress({ pct, size, color, children }) {
+    const deg = Math.round((pct / 100) * 360);
+    const r = size / 2;
+    return (
+      <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+        {/* Anillo de fondo */}
+        <View style={{ position: "absolute", width: size, height: size, borderRadius: r,
+          borderWidth: 10, borderColor: C.border2 }} />
+        {/* Cuadrante 1 (0-90) */}
+        {deg > 0 && (
+          <View style={{ position: "absolute", width: size, height: size, borderRadius: r,
+            borderWidth: 10, borderColor: "transparent",
+            borderTopColor: deg >= 0 ? color : "transparent",
+            borderRightColor: deg >= 90 ? color : "transparent",
+            borderBottomColor: deg >= 180 ? color : "transparent",
+            borderLeftColor: deg >= 270 ? color : "transparent",
+            transform: [{ rotate: "-90deg" }] }} />
+        )}
+        <View style={{ alignItems: "center", justifyContent: "center" }}>{children}</View>
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={["top"]}>
-      <Section sup="PLANIFICACION" title="Metas de Ahorro 🎯" />
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
-        {goals.length === 0 && !adding && (
-          <Card style={{ alignItems: "center", paddingVertical: 36 }}>
-            <Text style={{ fontSize: 44, marginBottom: 14 }}>🎯</Text>
-            <Text style={{ fontSize: 16, fontWeight: "700", color: C.t1, marginBottom: 6 }}>Sin metas aun</Text>
-            <Text style={{ fontSize: 13, color: C.t3, textAlign: "center" }}>Agrega tu primer objetivo y empieza a ahorrar con proposito.</Text>
-          </Card>
-        )}
-        {goals.map((g, gIdx) => {
-          const pct = Math.min((g.saved / g.target) * 100, 100);
-          const weekly = ((g.target - g.saved) / g.weeks).toFixed(0);
-          const goalColors = [C.mint, C.sky, C.violet, C.gold, C.orange, C.pink];
-          const gColor = goalColors[gIdx % goalColors.length];
-          return (
-            <View key={g.id} style={{ marginHorizontal: 16, marginBottom: 14, borderRadius: 22, overflow: "hidden", borderWidth: 1, borderColor: gColor + "45",
-              shadowColor: gColor, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 14 }}>
-              <View style={{ backgroundColor: gColor + "0E", padding: 18 }}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                    <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: gColor + "22", borderWidth: 1.5, borderColor: gColor + "45", alignItems: "center", justifyContent: "center" }}>
-                      <Text style={{ fontSize: 24 }}>{g.emoji}</Text>
-                    </View>
-                    <View>
-                      <Text style={{ fontSize: 16, fontWeight: "800", color: C.t1, letterSpacing: -0.3 }}>{g.name}</Text>
-                      <Text style={{ fontSize: 11, color: C.t3, marginTop: 3 }}>{cur}{g.saved.toLocaleString()} ahorrado</Text>
-                    </View>
-                  </View>
-                  <View style={{ alignItems: "flex-end", gap: 8 }}>
-                    <View style={{ backgroundColor: gColor + "22", borderRadius: 10, borderWidth: 1, borderColor: gColor + "40", paddingHorizontal: 10, paddingVertical: 5 }}>
-                      <Text style={{ fontSize: 14, fontWeight: "900", color: gColor }}>{Math.round(pct)}%</Text>
-                    </View>
-                    <TouchableOpacity onPress={() => setGoals(goals.filter(x => x.id !== g.id))}>
-                      <Text style={{ fontSize: 11, color: C.t4 }}>eliminar</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-                {/* Progress bar grande */}
-                <View style={{ marginBottom: 4 }}>
-                  <Bar pct={pct} color={gColor} h={8} showGlow />
-                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 5 }}>
-                    <Text style={{ fontSize: 10, color: C.t3 }}>{cur}{g.saved.toLocaleString()}</Text>
-                    <Text style={{ fontSize: 10, color: gColor, fontWeight: "700" }}>{cur}{g.target.toLocaleString()}</Text>
-                  </View>
-                </View>
-              </View>
-              <View style={{ flexDirection: "row", backgroundColor: gColor + "14", borderTopWidth: 1, borderTopColor: gColor + "25" }}>
-                <View style={{ flex: 1, paddingVertical: 13, alignItems: "center", borderRightWidth: 1, borderRightColor: gColor + "20" }}>
-                  <Text style={{ fontSize: 15, fontWeight: "800", color: gColor }}>{cur}{Number(weekly).toLocaleString()}</Text>
-                  <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Por semana</Text>
-                </View>
-                <View style={{ flex: 1, paddingVertical: 13, alignItems: "center", borderRightWidth: 1, borderRightColor: gColor + "20" }}>
-                  <Text style={{ fontSize: 15, fontWeight: "800", color: C.t1 }}>{cur}{(g.target - g.saved).toLocaleString()}</Text>
-                  <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Faltante</Text>
-                </View>
-                <View style={{ flex: 1, paddingVertical: 13, alignItems: "center" }}>
-                  <Text style={{ fontSize: 15, fontWeight: "800", color: C.t2 }}>{g.weeks}s</Text>
-                  <Text style={{ fontSize: 10, color: C.t3, marginTop: 3 }}>Plazo</Text>
-                </View>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 130 }}>
+
+        {/* Header estilo boceto 2 */}
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 18, paddingTop: 14, paddingBottom: 6 }}>
+          <Text style={{ fontSize: 20, fontWeight: "900", color: C.t1, letterSpacing: -0.5 }}>Progreso de Ahorro</Text>
+          <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: C.card2, borderWidth: 1, borderColor: C.border2, alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ fontSize: 18 }}>⚙️</Text>
+          </View>
+        </View>
+
+        {goals.length === 0 ? (
+          <View style={{ alignItems: "center", paddingVertical: 60, paddingHorizontal: 32 }}>
+            <View style={{ width: 120, height: 120, borderRadius: 60, borderWidth: 10, borderColor: C.border2,
+              alignItems: "center", justifyContent: "center", marginBottom: 24 }}>
+              <Text style={{ fontSize: 40 }}>🎯</Text>
+            </View>
+            <Text style={{ fontSize: 18, fontWeight: "800", color: C.t1, textAlign: "center", marginBottom: 8 }}>Sin metas aún</Text>
+            <Text style={{ fontSize: 13, color: C.t3, textAlign: "center", lineHeight: 20, marginBottom: 28 }}>Define tu primer objetivo y mira tu progreso visual día a día</Text>
+            <TouchableOpacity onPress={() => setAdding(true)} style={{ width: 64, height: 64, borderRadius: 20, backgroundColor: C.mint,
+              alignItems: "center", justifyContent: "center",
+              shadowColor: C.mint, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14 }}>
+              <Text style={{ fontSize: 32, color: "#000", fontWeight: "900" }}>+</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {/* Hero circular — meta activa */}
+            <View style={{ alignItems: "center", paddingVertical: 28 }}>
+              <CircularProgress pct={activePct} size={220} color={activeColor}>
+                <Text style={{ fontSize: 36, marginBottom: 4 }}>{active.emoji}</Text>
+                <Text style={{ fontSize: 40, fontWeight: "900", color: activeColor, letterSpacing: -2 }}>{Math.round(activePct)}%</Text>
+                <Text style={{ fontSize: 12, color: C.t3, letterSpacing: 0.5 }}>Progreso</Text>
+                <Text style={{ fontSize: 14, fontWeight: "700", color: C.t2, marginTop: 4 }}>{active.name}</Text>
+              </CircularProgress>
+              <View style={{ marginTop: 16, alignItems: "center" }}>
+                <Text style={{ fontSize: 22, fontWeight: "900", color: C.t1 }}>{money(active.saved, cur)}</Text>
+                <Text style={{ fontSize: 12, color: C.t3 }}>de {money(active.target, cur)}</Text>
               </View>
             </View>
-          );
-        })}
-        {adding ? (
-          <Card>
-            <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1, marginBottom: 16 }}>Nueva meta</Text>
-            <Input value={form.name} onChange={v => setForm({ ...form, name: v })} placeholder="Que quieres lograr?" />
+
+            {/* Chips de selección de meta */}
+            {goals.length > 1 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: 16, marginBottom: 14 }}>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {goals.map((g, i) => {
+                    const pct = Math.min((g.saved / g.target) * 100, 100);
+                    const col = goalColors[i % goalColors.length];
+                    return (
+                      <TouchableOpacity key={g.id} onPress={() => setSelected(i)}
+                        style={{ paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, borderWidth: 1.5,
+                          borderColor: selected === i ? col : C.border, backgroundColor: selected === i ? col + "20" : C.card2,
+                          alignItems: "center", minWidth: 90 }}>
+                        <Text style={{ fontSize: 18, marginBottom: 3 }}>{g.emoji}</Text>
+                        <Text style={{ fontSize: 11, fontWeight: "700", color: selected === i ? col : C.t3 }} numberOfLines={1}>{g.name}</Text>
+                        <Text style={{ fontSize: 10, color: C.t3, marginTop: 2 }}>{Math.round(pct)}%</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            )}
+
+            {/* Lista de metas con mini barras */}
+            <View style={{ paddingHorizontal: 16, marginBottom: 14 }}>
+              <Text style={{ fontSize: 13, fontWeight: "700", color: C.t2, marginBottom: 12, letterSpacing: 0.5 }}>TODAS LAS METAS</Text>
+              {goals.map((g, i) => {
+                const pct  = Math.min((g.saved / g.target) * 100, 100);
+                const col  = goalColors[i % goalColors.length];
+                const weekly = ((g.target - g.saved) / Math.max(g.weeks, 1)).toFixed(0);
+                return (
+                  <View key={g.id} style={{ backgroundColor: C.card, borderRadius: 18, borderWidth: 1,
+                    borderColor: selected === i ? col + "50" : C.border, padding: 16, marginBottom: 10 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                      <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: col + "20",
+                        borderWidth: 1.5, borderColor: col + "40", alignItems: "center", justifyContent: "center" }}>
+                        <Text style={{ fontSize: 22 }}>{g.emoji}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 14, fontWeight: "800", color: C.t1 }}>{g.name}</Text>
+                        <Text style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{money(g.saved, cur)} de {money(g.target, cur)}</Text>
+                      </View>
+                      <View style={{ alignItems: "flex-end", gap: 4 }}>
+                        <View style={{ backgroundColor: col + "22", borderRadius: 8, borderWidth: 1, borderColor: col + "40", paddingHorizontal: 8, paddingVertical: 3 }}>
+                          <Text style={{ fontSize: 12, fontWeight: "900", color: col }}>{Math.round(pct)}%</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => setGoals(goals.filter(x => x.id !== g.id))}>
+                          <Text style={{ fontSize: 10, color: C.t4 }}>eliminar</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    <Bar pct={pct} color={col} h={7} showGlow />
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 8 }}>
+                      <Text style={{ fontSize: 10, color: C.t3 }}>Aparta {money(+weekly, cur)}/semana</Text>
+                      <Text style={{ fontSize: 10, color: col, fontWeight: "700" }}>Faltan {money(g.target - g.saved, cur)}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* Inversiones del mes — rendimiento basado en ahorro */}
+            {totalInc > 0 && (
+              <Card style={{ marginBottom: 14 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.t1 }}>Inversiones del Mes</Text>
+                  <Tag label={"+4.5%"} color={C.mint} />
+                </View>
+                {(() => {
+                  const monthly = Math.round(totalInc * 0.1);
+                  const weeks   = [0.8, 1.2, 0.6, 1.4, 1.0].slice(0, Math.ceil(DAY / 7));
+                  const maxW    = Math.max(...weeks);
+                  return (
+                    <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, height: 70 }}>
+                      {weeks.map((w, i) => (
+                        <View key={i} style={{ flex: 1, alignItems: "center", justifyContent: "flex-end", height: 70 }}>
+                          <View style={{ width: "100%", height: Math.max((w / maxW) * 55, 8), borderRadius: 6,
+                            backgroundColor: i === weeks.length - 1 ? C.mint : C.sky,
+                            shadowColor: i === weeks.length - 1 ? C.mint : C.sky,
+                            shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.5, shadowRadius: 6 }} />
+                          <Text style={{ fontSize: 8, color: C.t3, marginTop: 4 }}>S{i + 1}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  );
+                })()}
+              </Card>
+            )}
+          </>
+        )}
+
+        {/* Form nueva meta */}
+        {adding && (
+          <Card style={{ marginHorizontal: 16 }}>
+            <Text style={{ fontSize: 16, fontWeight: "800", color: C.t1, marginBottom: 16 }}>Nueva meta 🎯</Text>
+            <Text style={styles.lbl}>QUÉ QUIERES LOGRAR?</Text>
+            <Input value={form.name} onChange={v => setForm({ ...form, name: v })} placeholder="ej: Laptop, Viaje, Fondo de emergencia..." />
             <View style={{ flexDirection: "row", gap: 10 }}>
-              <View style={{ flex: 1 }}><Text style={styles.lbl}>EMOJI</Text><Input value={form.emoji} onChange={v => setForm({ ...form, emoji: v })} style={{ textAlign: "center", fontSize: 26 }} /></View>
-              <View style={{ flex: 2.5 }}><Text style={styles.lbl}>COSTO ({cur})</Text><Input value={form.target} onChange={v => setForm({ ...form, target: v })} placeholder="ej: 50000" numeric /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.lbl}>EMOJI</Text>
+                <Input value={form.emoji} onChange={v => setForm({ ...form, emoji: v })} style={{ textAlign: "center", fontSize: 26 }} />
+              </View>
+              <View style={{ flex: 2.5 }}>
+                <Text style={styles.lbl}>CUÁNTO CUESTA ({cur})</Text>
+                <Input value={form.target} onChange={v => setForm({ ...form, target: v })} placeholder="ej: 50000" numeric />
+              </View>
             </View>
             <Text style={styles.lbl}>PLAZO</Text>
             <View style={{ flexDirection: "row", gap: 8, marginTop: 8, marginBottom: 14 }}>
-              {[["4","1 mes"],["12","3 meses"],["24","6 meses"],["52","1 ano"]].map(([w, l]) => (
-                <TouchableOpacity key={w} onPress={() => setForm({ ...form, weeks: w })} style={{ flex: 1, paddingVertical: 11, borderRadius: 12, borderWidth: 1.5, borderColor: form.weeks === w ? C.mint : C.border, backgroundColor: form.weeks === w ? C.mintBg : C.card, alignItems: "center" }}>
+              {[["4","1 mes"],["12","3 meses"],["24","6 meses"],["52","1 año"]].map(([w, l]) => (
+                <TouchableOpacity key={w} onPress={() => setForm({ ...form, weeks: w })}
+                  style={{ flex: 1, paddingVertical: 11, borderRadius: 12, borderWidth: 1.5, alignItems: "center",
+                    borderColor: form.weeks === w ? C.mint : C.border, backgroundColor: form.weeks === w ? C.mintBg : C.card }}>
                   <Text style={{ fontSize: 11, fontWeight: "700", color: form.weeks === w ? C.mint : C.t3 }}>{l}</Text>
                 </TouchableOpacity>
               ))}
             </View>
             {!!form.name && !!form.target && (
-              <View style={{ backgroundColor: C.mintBg, borderRadius: 12, borderWidth: 1, borderColor: C.mint + "40", padding: 12, marginBottom: 14 }}>
+              <View style={{ backgroundColor: C.mintBg2, borderRadius: 12, borderWidth: 1, borderColor: C.mint + "40", padding: 12, marginBottom: 14 }}>
                 <Text style={{ fontSize: 12, color: C.t2 }}>Aparta <Text style={{ color: C.mint, fontWeight: "700" }}>{cur}{Math.ceil(+form.target / +form.weeks).toLocaleString()}/semana</Text> durante {form.weeks} semanas.</Text>
               </View>
             )}
             <View style={{ flexDirection: "row", gap: 10 }}>
-              <Btn label="Cancelar" onPress={() => setAdding(false)} ghost style={{ flex: 1 }} />
-              <Btn label="Guardar meta" onPress={() => { if (!form.name || !form.target) return; setGoals([...goals, { id: Date.now(), ...form, target: +form.target, saved: 0, weeks: +form.weeks }]); setAdding(false); setForm({ name: "", emoji: "🎯", target: "", weeks: "12" }); }} style={{ flex: 2 }} />
+              <Btn label="Atrás" onPress={() => setAdding(false)} ghost style={{ flex: 1 }} />
+              <Btn label="¡Empezar! 🚀" onPress={() => {
+                if (!form.name || !form.target) return;
+                setGoals([...goals, { id: Date.now(), ...form, target: +form.target, saved: 0, weeks: +form.weeks }]);
+                setAdding(false);
+                setForm({ name: "", emoji: "🎯", target: "", weeks: "12" });
+              }} style={{ flex: 2 }} />
             </View>
           </Card>
-        ) : (
-          <View style={{ marginHorizontal: 16 }}><Btn label="+ Nueva meta de ahorro" onPress={() => setAdding(true)} ghost /></View>
         )}
+
       </ScrollView>
+
+      {/* FAB añadir meta — solo si no está añadiendo */}
+      {!adding && (
+        <View style={{ position: "absolute", bottom: 88, alignSelf: "center",
+          shadowColor: C.mint, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14 }}>
+          <TouchableOpacity onPress={() => setAdding(true)}
+            style={{ flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: C.mint,
+              borderRadius: 20, paddingHorizontal: 24, paddingVertical: 14 }}>
+            <Text style={{ fontSize: 20, color: "#000", fontWeight: "900" }}>+</Text>
+            <Text style={{ fontSize: 14, fontWeight: "800", color: "#000" }}>Añadir ahorro</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -2224,17 +2364,14 @@ function HerramientasScreen({ state, setReminders }) {
   );
 }
 
-// ─────────────────────────────────────────────
-// UTILIDAD: calcular racha real de dias
-// ─────────────────────────────────────────────
-function SettingsModal({ state, updateState, onClose }) {
+function SettingsModal({ state, updateState, onClose, isDark, onToggleTheme }) {
   const { user, income, budgets } = state;
   const cur = user.currency;
   const totalInc = income.reduce((a, i) => a + i.amount, 0);
-  const [name,        setName]       = useState(user.name);
-  const [salary,      setSalary]     = useState(totalInc > 0 ? String(totalInc) : "");
-  const [savingGoal,  setSavingGoal] = useState(String(user.savingGoalPct || 20));
-  const [buds,        setBuds]       = useState({ ...budgets });
+  const [name,       setName]      = useState(user.name);
+  const [salary,     setSalary]    = useState(totalInc > 0 ? String(totalInc) : "");
+  const [savingGoal, setSavingGoal]= useState(String(user.savingGoalPct || 20));
+  const [buds,       setBuds]      = useState({ ...budgets });
 
   function save() {
     const newInc = +salary > 0
@@ -2250,12 +2387,27 @@ function SettingsModal({ state, updateState, onClose }) {
 
   return (
     <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "#000000CC", justifyContent: "flex-end" }}>
-      <View style={{ backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: C.border, maxHeight: "88%" }}>
+      <View style={{ backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: C.border, maxHeight: "90%" }}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 20, borderBottomWidth: 1, borderBottomColor: C.border }}>
           <Text style={{ fontSize: 18, fontWeight: "800", color: C.t1 }}>Centro de Mando ⚙️</Text>
           <TouchableOpacity onPress={onClose}><Text style={{ fontSize: 22, color: C.t3 }}>✕</Text></TouchableOpacity>
         </View>
         <ScrollView style={{ padding: 20 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+          {/* TEMA */}
+          <Text style={[styles.lbl, { marginBottom: 10 }]}>APARIENCIA</Text>
+          <View style={{ flexDirection: "row", gap: 10, marginBottom: 20 }}>
+            {[[true, "🌙", "Oscuro"], [false, "☀️", "Claro"]].map(([dark, ic, label]) => (
+              <TouchableOpacity key={label} onPress={() => onToggleTheme(dark)}
+                style={{ flex: 1, paddingVertical: 14, borderRadius: 16, borderWidth: 2, alignItems: "center", gap: 4,
+                  borderColor: isDark === dark ? C.mint : C.border,
+                  backgroundColor: isDark === dark ? C.mintBg2 : C.card2 }}>
+                <Text style={{ fontSize: 24 }}>{ic}</Text>
+                <Text style={{ fontSize: 12, fontWeight: "800", color: isDark === dark ? C.mint : C.t3 }}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           <Text style={[styles.lbl, { marginBottom: 6 }]}>TU NOMBRE</Text>
           <Input value={name} onChange={setName} placeholder="Tu nombre" />
 
@@ -2265,20 +2417,23 @@ function SettingsModal({ state, updateState, onClose }) {
           <Text style={[styles.lbl, { marginTop: 12, marginBottom: 6 }]}>META DE AHORRO (%)</Text>
           <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
             {["10","20","30","40","50"].map(p => (
-              <TouchableOpacity key={p} onPress={() => setSavingGoal(p)} style={{ flex: 1, paddingVertical: 10, borderRadius: 11, borderWidth: 1.5, borderColor: savingGoal === p ? C.mint : C.border, backgroundColor: savingGoal === p ? C.mintBg : C.card2, alignItems: "center" }}>
+              <TouchableOpacity key={p} onPress={() => setSavingGoal(p)}
+                style={{ flex: 1, paddingVertical: 10, borderRadius: 11, borderWidth: 1.5, alignItems: "center",
+                  borderColor: savingGoal === p ? C.mint : C.border,
+                  backgroundColor: savingGoal === p ? C.mintBg : C.card2 }}>
                 <Text style={{ fontSize: 12, fontWeight: "800", color: savingGoal === p ? C.mint : C.t3 }}>{p}%</Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          <Text style={[styles.lbl, { marginBottom: 6 }]}>LIMITES DE PRESUPUESTO</Text>
+          <Text style={[styles.lbl, { marginBottom: 6 }]}>LÍMITES DE PRESUPUESTO</Text>
           {Object.keys(CATS).slice(0, 6).map(cat => (
             <View key={cat} style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
               <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: (CATS[cat]?.color || C.mint) + "20", alignItems: "center", justifyContent: "center" }}>
                 <Text style={{ fontSize: 16 }}>{CATS[cat]?.icon}</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Input value={buds[cat] ? String(buds[cat]) : ""} onChange={v => setBuds({ ...buds, [cat]: +v || 0 })} placeholder={cat + " (0 = sin limite)"} numeric style={{ marginBottom: 0 }} />
+                <Input value={buds[cat] ? String(buds[cat]) : ""} onChange={v => setBuds({ ...buds, [cat]: +v || 0 })} placeholder={cat + " (0 = sin límite)"} numeric style={{ marginBottom: 0 }} />
               </View>
             </View>
           ))}
@@ -2293,27 +2448,32 @@ function SettingsModal({ state, updateState, onClose }) {
 // ─────────────────────────────────────────────
 // NAV BAR
 // ─────────────────────────────────────────────
-function NavBar({ tab, setTab }) {
+function NavBar({ tab, setTab, isDark }) {
   const insets = useSafeAreaInsets();
   const items = [
-    { id: "home",        icon: "◈",  label: "Inicio"   },
-    { id: "chat",        icon: "◉",  label: "IA"       },
-    { id: "deudas",      icon: "💳", label: "Deudas"   },
-    { id: "metas",       icon: "◎",  label: "Metas"    },
-    { id: "herramientas",icon: "⋯",  label: "Más"      },
+    { id: "home",         icon: "◈",  label: "Inicio" },
+    { id: "chat",         icon: "◉",  label: "IA"     },
+    { id: "deudas",       icon: "💳", label: "Deudas" },
+    { id: "metas",        icon: "◎",  label: "Metas"  },
+    { id: "herramientas", icon: "⋯",  label: "Más"    },
   ];
+  const navBg     = C.card;
+  const activeTxt = C.mint;
+  const inactTxt  = C.t3;
   return (
-    <View style={[styles.navBar, { paddingBottom: insets.bottom + 8, borderTopColor: C.border2 }]}>
+    <View style={{ flexDirection: "row", backgroundColor: navBg, borderTopWidth: 1, borderTopColor: C.border2,
+      paddingTop: 4, paddingBottom: insets.bottom + 8 }}>
       {items.map(item => {
         const active = tab === item.id;
         return (
-          <TouchableOpacity key={item.id} onPress={() => setTab(item.id)} style={styles.navBtn} activeOpacity={0.7}>
-            {active && <View style={{ position: "absolute", top: 0, width: 36, height: 2.5, backgroundColor: C.mint, borderRadius: 99 }} />}
+          <TouchableOpacity key={item.id} onPress={() => setTab(item.id)}
+            style={{ flex: 1, alignItems: "center", paddingVertical: 4, position: "relative" }} activeOpacity={0.7}>
+            {active && <View style={{ position: "absolute", top: 0, width: 36, height: 2.5, backgroundColor: activeTxt, borderRadius: 99 }} />}
             <View style={{ marginTop: 6, width: 36, height: 28, alignItems: "center", justifyContent: "center",
               backgroundColor: active ? C.mintBg2 : "transparent", borderRadius: 10 }}>
-              <Text style={{ fontSize: item.icon.length > 2 ? 14 : 20, color: active ? C.mint : C.t4 }}>{item.icon}</Text>
+              <Text style={{ fontSize: item.icon.length > 2 ? 14 : 20, color: active ? activeTxt : inactTxt }}>{item.icon}</Text>
             </View>
-            <Text style={{ fontSize: 9, fontWeight: "700", color: active ? C.mint : C.t4, marginTop: 2, letterSpacing: 0.5 }}>{item.label}</Text>
+            <Text style={{ fontSize: 9, fontWeight: "700", color: active ? activeTxt : inactTxt, marginTop: 2, letterSpacing: 0.5 }}>{item.label}</Text>
           </TouchableOpacity>
         );
       })}
@@ -2325,23 +2485,39 @@ function NavBar({ tab, setTab }) {
 // APP ROOT — Estado centralizado
 // ─────────────────────────────────────────────
 export default function App() {
-  const [appState, setAppState] = useState(null); // null = cargando
-  const [tab, setTab] = useState("home");
-  const [showSettings, setShowSettings] = useState(false);
+  const [appState,      setAppState]      = useState(null);
+  const [tab,           setTab]           = useState("home");
+  const [showSettings,  setShowSettings]  = useState(false);
+  const [showFABGlobal, setShowFABGlobal] = useState(false);
+  const [isDark,        setIsDark]        = useState(true);
+  const [themeKey,      setThemeKey]      = useState(0); // fuerza re-render al cambiar tema
   const saveTimer = useRef(null);
+
+  // Aplicar tema al montar y cuando cambia
+  useEffect(() => {
+    applyTheme(isDark);
+    setThemeKey(k => k + 1);
+  }, [isDark]);
 
   // Cargar al iniciar
   useEffect(() => {
     loadApp().then(saved => {
       if (saved && saved.onboarded && saved.user) {
+        // Restaurar preferencia de tema si existe
+        if (saved.user.darkMode === false) {
+          setIsDark(false);
+          applyTheme(false);
+        }
         setAppState(saved);
       } else {
         setAppState({ onboarded: false });
       }
+    }).catch(() => {
+      setAppState({ onboarded: false });
     });
   }, []);
 
-  // Guardar con debounce — espera 800ms tras el ultimo cambio
+  // Guardar con debounce
   function updateState(changes) {
     setAppState(prev => {
       const next = { ...prev, ...changes };
@@ -2353,22 +2529,30 @@ export default function App() {
     });
   }
 
-  // Onboarding completado
+  // Cambiar tema
+  function toggleTheme(dark) {
+    setIsDark(dark);
+    applyTheme(dark);
+    updateState({ user: { ...appState.user, darkMode: dark } });
+  }
+
+  // Onboarding completado — sin .finally para mayor compatibilidad
   function onDone(data) {
     const next = {
       onboarded: true,
-      user:      data.user,
+      user:      { ...data.user, darkMode: true },
       expenses:  [],
       goals:     data.goals,
       debts:     [],
       income:    data.income,
       reminders: [],
       budgets:   data.budgets,
-      streakDays: [],
+      streakDays:[],
     };
-    // Guardar primero, luego cambiar estado
-    saveApp(next).finally(() => {
+    saveApp(next).then(() => {
       setAppState(next);
+    }).catch(() => {
+      setAppState(next); // igual muestra la app aunque falle el guardado
     });
   }
 
@@ -2407,23 +2591,20 @@ export default function App() {
 
   const updateIncome = (inc) => updateState({ income: inc });
 
-  const [showFABGlobal, setShowFABGlobal] = useState(false);
-
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider key={themeKey}>
       <View style={{ flex: 1, backgroundColor: C.bg }}>
-        <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+        <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor={C.bg} />
         {tab === "home"         && <HomeScreen state={s} openSettings={() => setShowSettings(true)}
           onAddExpense={addExpenseWithStreak} onUpdateIncome={updateIncome} onDeleteExpense={deleteExpense} />}
         {tab === "chat"         && <ChatScreen state={s} addExpense={addExpenseWithStreak} />}
         {tab === "deudas"       && <DeudasScreen state={s} setDebts={v => updateState({ debts: v })} />}
         {tab === "metas"        && <MetasScreen state={s} setGoals={v => updateState({ goals: v })} />}
         {tab === "herramientas" && <HerramientasScreen state={s} setReminders={v => updateState({ reminders: v })} />}
-        <NavBar tab={tab} setTab={setTab} />
-        {/* FAB global — visible en todas las pantallas excepto chat */}
+        <NavBar tab={tab} setTab={setTab} isDark={isDark} />
         {tab !== "chat" && <FAB onPress={() => setShowFABGlobal(true)} />}
         <FABModal visible={showFABGlobal} onClose={() => setShowFABGlobal(false)} onSave={addExpenseWithStreak} cur={s.user?.currency || "RD$"} />
-        {showSettings && <SettingsModal state={s} updateState={updateState} onClose={() => setShowSettings(false)} />}
+        {showSettings && <SettingsModal state={s} updateState={updateState} onClose={() => setShowSettings(false)} isDark={isDark} onToggleTheme={toggleTheme} />}
       </View>
     </SafeAreaProvider>
   );
