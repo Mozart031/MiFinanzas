@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "184364852664",
+    "project_id": "fynx-f09d8",
+    "storage_bucket": "fynx-f09d8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:184364852664:android:3c67cf6da748f0e8291b4d",
+        "android_client_info": {
+          "package_name": "com.fynx.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBLglzupI41PY6W7VJ5c_-EQ_vbbVDBbf0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
